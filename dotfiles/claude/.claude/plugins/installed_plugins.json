@@ -1,0 +1,41 @@
+{
+  "version": 2,
+  "plugins": {
+    "clangd-lsp@claude-plugins-official": [
+      {
+        "scope": "project",
+        "projectPath": "/home/pchoudhury",
+        "installPath": "/home/pchoudhury/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0",
+        "version": "1.0.0",
+        "installedAt": "2026-08-12T19:47:44.824Z",
+        "lastUpdated": "2026-08-12T19:47:44.824Z"
+      },
+      {
+        "scope": "user",
+        "installPath": "/home/pchoudhury/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0",
+        "version": "1.0.0",
+        "installedAt": "2026-08-14T13:51:55.433Z",
+        "lastUpdated": "2026-08-14T13:51:55.433Z"
+      }
+    ],
+    "lua-lsp@claude-plugins-official": [
+      {
+        "scope": "user",
+        "installPath": "/home/pchoudhury/.claude/plugins/cache/claude-plugins-official/lua-lsp/1.0.0",
+        "version": "1.0.0",
+        "installedAt": "2026-09-02T22:01:28.187Z",
+        "lastUpdated": "2026-09-02T22:01:28.187Z"
+      }
+    ],
+    "codex@openai-codex": [
+      {
+        "scope": "user",
+        "installPath": "/home/pchoudhury/.claude/plugins/cache/openai-codex/codex/1.0.6",
+        "version": "1.0.6",
+        "installedAt": "2026-09-18T20:08:01.255Z",
+        "lastUpdated": "2026-09-18T20:08:01.255Z",
+        "gitCommitSha": "db52e28f4d9ded852ab3942cea316258ae4ef346"
+      }
+    ]
+  }
+}

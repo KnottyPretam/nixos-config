@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(adb devices *)",
+      "Read(//dev/serial/by-id/**)",
+      "Bash(lsusb)",
+      "Bash(timeout 4 python3 adb_100hz.py)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(timeout -s INT 4 python3 -u adb_100hz.py)"
+    ]
+  }
+}
