@@ -73,6 +73,10 @@
 
     # Build and development tools
     gcc
+    # nvim-treesitter's main branch builds parsers by shelling out to
+    # `tree-sitter build`; the master-era gcc compile path is gone, so gcc
+    # alone is not enough.
+    tree-sitter
     clang-tools
     gnumake
     cmake
@@ -164,78 +168,12 @@
     enable = true;
     enableBashIntegration = true;
 
-    settings = {
-      add_newline = true;
-      palette = "gruvbox_dark";
-
-      format = "$username$hostname$directory$git_branch$git_status$nix_shell$python$cpp$cmd_duration$line_break$character";
-
-      character = {
-        success_symbol = "[❯](bold green)";
-        error_symbol = "[❯](bold red)";
-        vimcmd_symbol = "[❮](bold green)";
-      };
-
-      directory = {
-        style = "bold blue";
-        truncation_length = 4;
-        truncate_to_repo = false;
-        read_only = " 󰌾";
-      };
-
-      git_branch = {
-        symbol = " ";
-        style = "bold purple";
-      };
-
-      git_status = {
-        style = "bold yellow";
-        conflicted = "=";
-        ahead = "⇡\${count}";
-        behind = "⇣\${count}";
-        diverged = "⇕⇡\${ahead_count}⇣\${behind_count}";
-        untracked = "?\${count}";
-        stashed = "$";
-        modified = "!\${count}";
-        staged = "+\${count}";
-        renamed = "»\${count}";
-        deleted = "✘\${count}";
-      };
-
-      nix_shell = {
-        symbol = " ";
-        style = "bold blue";
-      };
-
-      python = {
-        symbol = " ";
-        style = "bold yellow";
-      };
-
-      cpp = {
-        symbol = " ";
-        style = "bold blue";
-      };
-
-      cmd_duration = {
-        min_time = 2000;
-        format = "took [$duration]($style) ";
-        style = "bold yellow";
-      };
-
-      palettes.gruvbox_dark = {
-        black = "#282828";
-        red = "#cc241d";
-        green = "#98971a";
-        yellow = "#d79921";
-        blue = "#458588";
-        purple = "#b16286";
-        aqua = "#689d6a";
-        white = "#a89984";
-        orange = "#d65d0e";
-      };
-    };
+    # `settings` left unset so the module skips generating starship.toml and the
+    # verbatim dotfile owns it - same pattern as hypr and waybar.
   };
+
+  xdg.configFile."starship.toml".source =
+    ./dotfiles/starship/.config/starship.toml;
 
   # ---------------------------------------------------------------------------
   # Better shell utilities
@@ -465,6 +403,12 @@
 
       "window-padding-x" = 8;
       "window-padding-y" = 8;
+
+      # ~30% transparent so the wallpaper shows through slightly.
+      # background-blur softens whatever is behind it; drop it if you want the
+      # background perfectly sharp.
+      "background-opacity" = 0.7;
+      "background-blur" = true;
 
       "cursor-style" = "block";
       "cursor-style-blink" = false;
