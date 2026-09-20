@@ -597,6 +597,66 @@ in
 
   services.mako.enable = true;
 
+  # ---------------------------------------------------------------------------
+  # Dark mode
+  #
+  # Three separate mechanisms have to agree, or you get a half-dark desktop:
+  #   1. gtk.*            - GTK3/GTK4 apps read ~/.config/gtk-{3.0,4.0}
+  #   2. dconf color-scheme - what xdg-desktop-portal reports to Electron,
+  #                           Chromium and Firefox as org.freedesktop.appearance
+  #   3. qt.*             - Qt apps, which ignore both of the above
+  # ---------------------------------------------------------------------------
+
+  gtk = {
+    enable = true;
+
+    theme = {
+      package = pkgs.gruvbox-gtk-theme;
+      name = "Gruvbox-Dark";
+    };
+
+    iconTheme = {
+      package = pkgs.gruvbox-plus-icons;
+      name = "Gruvbox-Plus-Dark";
+    };
+
+    font = {
+      name = "Noto Sans";
+      size = 11;
+    };
+
+    # Older GTK3 apps honour this rather than the portal preference.
+    gtk3.extraConfig.gtk-application-prefer-dark-theme = 1;
+    gtk4.extraConfig.gtk-application-prefer-dark-theme = 1;
+  };
+
+  # This is the lever that actually reaches Chromium, Claude Desktop, ChatGPT
+  # Desktop and Firefox - they ask xdg-desktop-portal, not GTK.
+  dconf.settings."org/gnome/desktop/interface" = {
+    color-scheme = "prefer-dark";
+    gtk-theme = "Gruvbox-Dark";
+    icon-theme = "Gruvbox-Plus-Dark";
+    cursor-theme = "Bibata-Modern-Classic";
+    cursor-size = 24;
+  };
+
+  qt = {
+    enable = true;
+    platformTheme.name = "adwaita";
+    style.name = "adwaita-dark";
+  };
+
+  # Sets the cursor for Wayland, XWayland and GTK in one place. Size 24 matches
+  # the XCURSOR_SIZE / HYPRCURSOR_SIZE already exported in hyprland.conf.
+  # Do NOT also set gtk.cursorTheme - this owns that.
+  home.pointerCursor = {
+    package = pkgs.bibata-cursors;
+    name = "Bibata-Modern-Classic";
+    size = 24;
+    gtk.enable = true;
+    x11.enable = true;
+  };
+
   services.hyprpaper = {
     enable = true;
 
