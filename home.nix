@@ -1,4 +1,4 @@
-{ config, pkgs, ... }:
+{ config, pkgs, inputs, ... }:
 
 let
   # Powerline separators. Built from \u escapes rather than pasted literally:
@@ -26,7 +26,14 @@ in
   # Make ~/.local/bin available for Claude Code and other user-installed tools.
   home.sessionPath = [
     "$HOME/.local/bin"
+    "$HOME/tools/bin"
+    "$HOME/.npm-packages/bin"
+    "$HOME/.grok/bin"
   ];
+
+  home.sessionVariables = {
+    FORGEJO_URL = "https://code.grail.tiberius.com";
+  };
 
   # ---------------------------------------------------------------------------
   # General packages
@@ -36,10 +43,69 @@ in
     # Agents
     claude-code
 
+    # Claude and ChatGPT desktop apps, from the flake inputs. Grok has no
+    # desktop client on any platform, so it runs as a Chromium web-app - see
+    # the ai-scratchpad-cycle script below.
+    inputs.claude-desktop.packages.${pkgs.stdenv.hostPlatform.system}.claude-desktop
+    inputs.chatgpt-desktop.packages.${pkgs.stdenv.hostPlatform.system}.chatgpt-desktop
+    chromium
+
+    # SUPER+G cycles a centered AI overlay: ChatGPT -> Claude -> Grok -> back to
+    # work. Three special workspaces, one per app; Hyprland allows only one
+    # visible per monitor, so they are mutually exclusive by construction and a
+    # single `togglespecialworkspace` swaps straight between them.
+    #
+    # This lives in a script rather than inline in hyprland.conf because
+    # hyprlang mangles inline shell: it pre-seeds every environment variable as
+    # a `$NAME` substring substitution (colliding with $PATH, $HOME and the
+    # config's own $menu/$mainMod), a bare `#` truncates the line anywhere, and
+    # `{{ }}` is hyprlang's own expression syntax.
+    (pkgs.writeShellScriptBin "ai-scratchpad-cycle" ''
+      set -eu
+
+      # `size` takes a muParser expression in Hyprland 0.56 - percentages
+      # silently no-op. monitor_w/monitor_h are the LOGICAL size, so this is
+      # scale-correct.
+      RULES='float; center; size monitor_w*0.6 monitor_h*0.75'
+
+      # Reports the prefixed name, or "" when no special workspace is open.
+      cur=$(hyprctl monitors -j \
+        | jq -r 'first(.[] | select(.focused)) | .specialWorkspace.name // ""')
+
+      case "$cur" in
+        special:ai-chatgpt) next=ai-claude ;;
+        special:ai-claude)  next=ai-grok ;;
+        # Last step: close the overlay. Hyprland restores focus to whatever was
+        # focused on the underlying workspace.
+        special:ai-grok)    hyprctl dispatch togglespecialworkspace ai-grok; exit 0 ;;
+        *)                  next=ai-chatgpt ;;
+      esac
+
+      n=$(hyprctl clients -j \
+        | jq --arg w "special:$next" '[.[] | select(.workspace.name == $w)] | length')
+
+      if [ "$n" -eq 0 ]; then
+        case "$next" in
+          ai-chatgpt) cmd='chatgpt' ;;
+          ai-claude)  cmd='claude-desktop' ;;
+          ai-grok)    cmd='chromium --app=https://grok.com --class=grok' ;;
+        esac
+        # Bracket exec-rules split on ';' (not ','), and attach by PID+token
+        # rather than window class - which is why the unknown app_ids of the
+        # two flake apps do not matter. No `silent`: mapping the window opens
+        # its special workspace and focuses it, which is what we want here.
+        hyprctl dispatch exec "[workspace special:$next; $RULES] $cmd"
+      else
+        # Dispatch the BARE name - the dispatcher prepends "special:" itself.
+        hyprctl dispatch togglespecialworkspace "$next"
+      fi
+    '')
+
     # Hyprland desktop utilities
     # NOTE: waybar and mako are installed by programs.waybar / services.mako
     # below, not here, so they get systemd user units.
     fuzzel
+    rofi # NB: `rofi-wayland` was merged into `rofi` and now throws on reference
     networkmanagerapplet
     pavucontrol
     brightnessctl
@@ -51,7 +117,7 @@ in
     grim
     slurp
     swappy
-    grimblast
+    hyprshot
     yazi
 
     # Terminal utilities
@@ -102,9 +168,6 @@ in
     shfmt
     nixfmt
     nil
-
-    # Fonts
-    nerd-fonts.jetbrains-mono
   ];
 
   fonts.fontconfig.enable = true;
@@ -259,10 +322,8 @@ in
         syntax-theme = "gruvbox-dark";
       };
 
-      # Uncomment and fill these in:
-      #
-      # user.name = "Pretam Choudhury";
-      # user.email = "your-email@example.com";
+      user.name = "KnottyPretam";
+      user.email = "pretam.choudhury@gmail.com";
     };
   };
 
@@ -283,7 +344,7 @@ in
     # The neovim module owns ~/.config/nvim/init.lua (it writes the node/python
     # provider stanzas there), so the dotfile init.lua has to go through
     # extraLuaConfig rather than a competing xdg.configFile entry.
-    extraLuaConfig = builtins.readFile ./dotfiles/nvim/.config/nvim/init.lua;
+    initLua = builtins.readFile ./dotfiles/nvim/.config/nvim/init.lua;
   };
 
   # Everything else under ~/.config/nvim. Note these paths point at the *inner*

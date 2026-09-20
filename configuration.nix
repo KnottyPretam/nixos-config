@@ -21,6 +21,20 @@
 
   time.timeZone = "America/Phoenix";
 
+  i18n.defaultLocale = "en_US.UTF-8";
+
+  i18n.extraLocaleSettings = {
+    LC_ADDRESS = "en_US.UTF-8";
+    LC_IDENTIFICATION = "en_US.UTF-8";
+    LC_MEASUREMENT = "en_US.UTF-8";
+    LC_MONETARY = "en_US.UTF-8";
+    LC_NAME = "en_US.UTF-8";
+    LC_NUMERIC = "en_US.UTF-8";
+    LC_PAPER = "en_US.UTF-8";
+    LC_TELEPHONE = "en_US.UTF-8";
+    LC_TIME = "en_US.UTF-8";
+  };
+
   users.users.pretamc = {
     isNormalUser = true;
     description = "Pretam";
@@ -83,6 +97,27 @@
     noto-fonts
     noto-fonts-color-emoji
   ];
+
+  # Without this, `fc-match monospace` resolves to DejaVu Sans Mono and anything
+  # that asks for the generic family - fuzzel, mako, GTK apps - gets no Nerd
+  # Font glyphs. The "Mono" variant squeezes icons to one cell, which is what
+  # anything assuming a character grid needs.
+  fonts.fontconfig.defaultFonts = {
+    monospace = [
+      "JetBrainsMono Nerd Font Mono"
+      "Noto Sans Mono"
+      "DejaVu Sans Mono"
+    ];
+    sansSerif = [
+      "Noto Sans"
+      "DejaVu Sans"
+    ];
+    serif = [
+      "Noto Serif"
+      "DejaVu Serif"
+    ];
+    emoji = [ "Noto Color Emoji" ];
+  };
 
   environment.systemPackages = with pkgs; [
     vim
