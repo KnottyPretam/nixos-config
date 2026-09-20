@@ -75,23 +75,70 @@ let
     fi
     # Already visible: do nothing.
   '';
-  aiScratchpadCycle = pkgs.writeShellScriptBin "ai-scratchpad-cycle" ''
+  aiScratchpadToggle = pkgs.writeShellScriptBin "ai-scratchpad-toggle" ''
     set -eu
 
     # Reports the prefixed name, or "" when no special workspace is open.
+    # Do NOT use a window's .visible/.hidden here - all three AI windows report
+    # visible=true even when no special workspace is active.
     cur=$(hyprctl monitors -j \
       | jq -r 'first(.[] | select(.focused)) | .specialWorkspace.name // ""')
 
+    # An overlay is up: hide it. Hyprland restores focus to whatever was
+    # focused on the underlying workspace.
     case "$cur" in
-      special:ai-chatgpt) next=ai-claude ;;
-      special:ai-claude)  next=ai-grok ;;
-      # Last step: close the overlay. Hyprland restores focus to whatever was
-      # focused on the underlying workspace.
-      special:ai-grok)    hyprctl dispatch togglespecialworkspace ai-grok; exit 0 ;;
-      *)                  next=ai-chatgpt ;;
+      special:ai-*)
+        hyprctl dispatch togglespecialworkspace "''${cur#special:}"
+        exit 0
+        ;;
+    esac
+
+    # Nothing up: reopen whichever AI app was focused most recently.
+    # focusHistoryID is Hyprland's MRU index - 0 is the focused window, larger
+    # is longer ago - so the lowest among the three wins. The >= 0 filter is
+    # load-bearing: a window missing from the history reports -1, which would
+    # otherwise sort first and always win.
+    # Keyed on class, not workspace, so a drifted window still maps correctly.
+    pick=$(hyprctl clients -j | jq -r '
+      [ .[]
+        | select(.focusHistoryID >= 0)
+        | select(.class == "chrome-chatgpt.com__-Default"
+              or .class == "chrome-claude.ai__-Default"
+              or .class == "chrome-grok.com__-Default")
+      ] | sort_by(.focusHistoryID) | first | .class // ""')
+
+    case "$pick" in
+      chrome-chatgpt.com__-Default) ws=ai-chatgpt ;;
+      chrome-claude.ai__-Default)   ws=ai-claude ;;
+      chrome-grok.com__-Default)    ws=ai-grok ;;
+      *)                            ws=ai-chatgpt ;; # none running yet
     esac
 
     # Absolute store path so this does not depend on PATH.
+    exec ${aiScratchpadShow}/bin/ai-scratchpad-show "$ws"
+  '';
+
+  aiScratchpadNext = pkgs.writeShellScriptBin "ai-scratchpad-next" ''
+    set -eu
+
+    cur=$(hyprctl monitors -j \
+      | jq -r 'first(.[] | select(.focused)) | .specialWorkspace.name // ""')
+
+    # The guard: do nothing at all unless an AI overlay is actually up. This is
+    # what scopes SUPER+Tab to the overlay. A Hyprland submap would scope it
+    # natively, but while a submap is active every bind outside it stops firing
+    # - a stuck submap would cost the lock screen and volume keys too.
+    case "$cur" in
+      special:ai-chatgpt) next=ai-claude ;;
+      special:ai-claude)  next=ai-grok ;;
+      special:ai-grok)    next=ai-chatgpt ;; # wrap
+      *) exit 0 ;;
+    esac
+
+    # Delegate to `show`, never dispatch togglespecialworkspace directly:
+    # special workspaces are destroyed when they empty, so Tabbing to an app
+    # that was never launched would otherwise reveal a blank overlay. Only
+    # `show` has the launch-if-absent path.
     exec ${aiScratchpadShow}/bin/ai-scratchpad-show "$next"
   '';
 in
@@ -154,7 +201,8 @@ in
     # config's own $menu/$mainMod), a bare `#` truncates the line anywhere, and
     # `{{ }}` is hyprlang's own expression syntax.
     aiScratchpadShow
-    aiScratchpadCycle
+    aiScratchpadToggle
+    aiScratchpadNext
 
     # Hyprland desktop utilities
     # NOTE: waybar and mako are installed by programs.waybar / services.mako
