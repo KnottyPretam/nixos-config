@@ -12,6 +12,44 @@ let
   # app->command mapping exists in exactly one place.
   # ---------------------------------------------------------------------------
 
+  # ---------------------------------------------------------------------------
+  # Wallpaper: advance one step per session (boot or Hyprland restart).
+  # Deliberately NOT a timer - it must not change while the session is running.
+  # ---------------------------------------------------------------------------
+  wallpaperRotate = pkgs.writeShellScript "wallpaper-rotate" ''
+    set -eu
+
+    # The store copy of ./wallpapers. Because this is a store path, the script
+    # (and so the unit's ExecStart) changes whenever the folder changes, which
+    # is what makes "rebuild to pick up a new image" work.
+    dir=${./wallpapers}
+
+    # Persisting the index is what makes the sequence survive a reboot -
+    # without it every session would start at the same image.
+    state="''${XDG_STATE_HOME:-$HOME/.local/state}/wallpaper-index"
+
+    # Glob expansion is sorted, so this is a stable sequence.
+    set -- "$dir"/*
+    [ -e "$1" ] || exit 0
+
+    i=0
+    [ -r "$state" ] && i=$(cat "$state") || true
+    case "$i" in ""|*[!0-9]*) i=0 ;; esac
+    i=$(( i % $# ))          # modulo, so removing an image cannot overrun
+
+    eval "pick=\''${$(( i + 1 ))}"
+    mkdir -p "$(dirname "$state")"
+    echo $(( (i + 1) % $# )) > "$state"
+
+    # hyprpaper starts in parallel with us; its socket may not be up yet.
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      if hyprctl hyprpaper wallpaper ",$pick"; then exit 0; fi
+      sleep 1
+    done
+    echo "wallpaper-rotate: hyprpaper did not answer" >&2
+    exit 1
+  '';
+
   aiScratchpadShow = pkgs.writeShellScriptBin "ai-scratchpad-show" ''
     set -eu
     ws="''${1:?usage: ai-scratchpad-show <ai-chatgpt|ai-claude|ai-grok>}"
@@ -276,9 +314,6 @@ in
   fonts.fontconfig.enable = true;
 
   # Wallpaper lives in the repo, so a fresh machine gets it from the flake.
-  # Materializing it at a fixed path (rather than referencing the /nix/store
-  # path directly) lets hyprpaper.conf and hyprlock.conf name it literally.
-  home.file."Pictures/wallpapers/blackhole.jpg".source = ./wallpapers/blackhole.jpg;
 
   # ---------------------------------------------------------------------------
   # Bash
@@ -699,6 +734,43 @@ in
     ./dotfiles/waybar/.config/waybar/style.css;
 
   services.mako.enable = true;
+
+  # Restores the daemon that was lost when an over-broad edit to
+  # xdg.desktopEntries swallowed this block in 73bd28c.
+  services.hyprpaper = {
+    enable = true;
+
+    settings = {
+      splash = false;
+
+      # Load-bearing: wallpaper-rotate sets the image over IPC. hyprpaper
+      # 0.8.4's IPC is down to just `wallpaper` and `listactive` - preload,
+      # unload, listloaded and reload were all removed with the old protocol.
+      ipc = "on";
+
+      # Deliberately NO `wallpaper` entry: wallpaper-rotate below is the single
+      # source of truth for which image is shown. Declaring one here would mean
+      # two places decide, and it would flash past on every login.
+    };
+  };
+
+  systemd.user.services.wallpaper-rotate = {
+    Unit = {
+      Description = "Advance the wallpaper one step per session";
+      ConditionEnvironment = "WAYLAND_DISPLAY";
+      After = [ "graphical-session.target" "hyprpaper.service" ];
+      PartOf = [ "graphical-session.target" ];
+    };
+
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${wallpaperRotate}";
+    };
+
+    # Unlike a timer, this one DOES install into the target - running once at
+    # session start is the whole point.
+    Install.WantedBy = [ "graphical-session.target" ];
+  };
 
   # ---------------------------------------------------------------------------
   # Dark mode
