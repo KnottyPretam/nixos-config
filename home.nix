@@ -231,6 +231,9 @@ in
     # profiles - see the ai-scratchpad-show script above.
     chromium
 
+    # Desktop applications
+    obsidian
+
     # SUPER+G cycles a centered AI overlay: ChatGPT -> Claude -> Grok -> back to
     # work. Three special workspaces, one per app; Hyprland allows only one
     # visible per monitor, so they are mutually exclusive by construction and a
