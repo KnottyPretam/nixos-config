@@ -14,36 +14,69 @@ let
 
   aiScratchpadShow = pkgs.writeShellScriptBin "ai-scratchpad-show" ''
     set -eu
-    ws="''${1:?usage: ai-scratchpad-show ai-chatgpt|ai-claude|ai-grok}"
+    ws="''${1:?usage: ai-scratchpad-show <ai-chatgpt|ai-claude|ai-grok> [url]}"
+    shift || true
+    url="''${1:-}"
 
     # `size` takes a muParser expression in Hyprland 0.56 - percentages
     # silently no-op. monitor_w/monitor_h are the LOGICAL size, so this is
     # scale-correct.
     RULES='float; center; size monitor_w*0.6 monitor_h*0.75'
 
+    # `bin` is the plain binary used to hand a deep link to an already-running
+    # instance. Grok is a Chromium web-app and has no scheme handler, so it has
+    # no bin.
+    # `cls` is the live Wayland app_id, used only to RECOVER a window that has
+    # drifted off its special workspace (which happens when a deep link or a
+    # stray launch pulls it out). Placement still relies on PID+token exec
+    # rules, not on class.
     case "$ws" in
-      ai-chatgpt) cmd='chatgpt' ;;
-      ai-claude)  cmd='claude-desktop' ;;
-      ai-grok)    cmd='chromium --app=https://grok.com --class=grok' ;;
+      ai-chatgpt) bin='chatgpt';        cmd="$bin"; cls='Chatgpt' ;;
+      ai-claude)  bin='claude-desktop'; cmd="$bin"; cls='com.anthropic.Claude' ;;
+      ai-grok)    bin="";               cls='chrome-grok.com__-Default'
+                  cmd='chromium --app=https://grok.com --class=grok' ;;
       *) echo "unknown scratchpad: $ws" >&2; exit 1 ;;
     esac
 
-    n=$(hyprctl clients -j \
-      | jq --arg w "special:$ws" '[.[] | select(.workspace.name == $w)] | length')
+    # Find an existing window for this app ANYWHERE, not just on its own
+    # special workspace - otherwise a drifted window looks like "not running",
+    # we relaunch, Electron single-instance swallows it, and nothing appears.
+    addr=$(hyprctl clients -j \
+      | jq -r --arg c "$cls" 'first(.[] | select(.class == $c)) | .address // ""')
+    at=$(hyprctl clients -j \
+      | jq -r --arg c "$cls" 'first(.[] | select(.class == $c)) | .workspace.name // ""')
     cur=$(hyprctl monitors -j \
       | jq -r 'first(.[] | select(.focused)) | .specialWorkspace.name // ""')
 
-    if [ "$n" -eq 0 ]; then
+    if [ -n "$addr" ] && [ "$at" != "special:$ws" ]; then
+      # Drifted - pull it home before revealing.
+      hyprctl dispatch movetoworkspacesilent "special:$ws,address:$addr"
+    fi
+
+    if [ -z "$addr" ]; then
       # Bracket exec-rules split on ';' (not ','), and attach by PID+token
       # rather than window class - which is why the unknown app_ids of the two
       # flake apps do not matter. No `silent`: mapping the window opens its
       # special workspace and focuses it, which is what we want here.
-      hyprctl dispatch exec "[workspace special:$ws; $RULES] $cmd"
-    elif [ "$cur" != "special:$ws" ]; then
-      # Dispatch the BARE name - the dispatcher prepends "special:" itself.
-      hyprctl dispatch togglespecialworkspace "$ws"
+      if [ -n "$url" ] && [ -n "$bin" ]; then
+        hyprctl dispatch exec "[workspace special:$ws; $RULES] $bin '$url'"
+      else
+        hyprctl dispatch exec "[workspace special:$ws; $RULES] $cmd"
+      fi
+    else
+      # Already running. A deep link (an OAuth callback such as claude://...)
+      # must be handed to the live instance, or sign-in silently never
+      # completes. Invoked directly rather than through hyprctl so the URL
+      # keeps normal shell quoting.
+      if [ -n "$url" ] && [ -n "$bin" ]; then
+        "$bin" "$url" >/dev/null 2>&1 &
+      fi
+      if [ "$cur" != "special:$ws" ]; then
+        # Dispatch the BARE name - the dispatcher prepends "special:" itself.
+        hyprctl dispatch togglespecialworkspace "$ws"
+      fi
     fi
-    # Already visible: do nothing.
+    # Already visible and no url: do nothing.
   '';
 
   aiScratchpadCycle = pkgs.writeShellScriptBin "ai-scratchpad-cycle" ''
@@ -735,7 +768,7 @@ in
       genericName = "AI assistant";
       comment = "ChatGPT by OpenAI";
       icon = "chatgpt";
-      exec = "ai-scratchpad-show ai-chatgpt";
+      exec = "ai-scratchpad-show ai-chatgpt %U";
       type = "Application";
       categories = [ "Utility" "Development" ];
 
@@ -751,7 +784,7 @@ in
       genericName = "AI Assistant";
       comment = "Desktop application for Claude.ai";
       icon = "claude-desktop";
-      exec = "ai-scratchpad-show ai-claude";
+      exec = "ai-scratchpad-show ai-claude %U";
       type = "Application";
       categories = [ "Utility" "Development" ];
       mimeType = [ "x-scheme-handler/claude" ];
