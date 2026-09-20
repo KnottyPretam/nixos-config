@@ -1,5 +1,14 @@
 { config, pkgs, ... }:
 
+let
+  # Powerline separators. Built from \u escapes rather than pasted literally:
+  # these live in the Unicode Private Use Area and are easy to mangle when the
+  # file is edited by tools that normalise text.
+  plRight = builtins.fromJSON ''"\ue0b0"'';  # right-pointing triangle
+  plLeft = builtins.fromJSON ''"\ue0b2"'';   # left-pointing triangle
+  plRCap = builtins.fromJSON ''"\ue0b4"'';   # rounded right cap
+  plLCap = builtins.fromJSON ''"\ue0b6"'';   # rounded left cap
+in
 {
   # ---------------------------------------------------------------------------
   # Home Manager identity
@@ -376,18 +385,18 @@
       set -g status-style "bg=#1d2230,fg=#a0a9cb"
 
       # Left: session name on tokyo-night blue, closed with a powerline chevron.
-      set -g status-left "#[fg=#090c0c,bg=#769ff0,bold]  #S #[fg=#769ff0,bg=#1d2230,nobold]"
+      set -g status-left "#[fg=#769ff0,bg=#1d2230]${plLCap}#[fg=#090c0c,bg=#769ff0,bold]  #S #[fg=#769ff0,bg=#1d2230,nobold]${plRight} "
       set -g status-left-length 40
 
       # Right: prefix indicator when armed, then the clock on the slate segment.
-      set -g status-right "#[fg=#212736,bg=#1d2230]#[fg=#a3aed2,bg=#212736]#{?client_prefix,#[fg=#ff9e64#,bold] PREFIX #[fg=#a3aed2#,nobold],}  %H:%M "
+      set -g status-right "#[fg=#212736,bg=#1d2230]${plLeft}#[fg=#a3aed2,bg=#212736]#{?client_prefix,#[fg=#ff9e64#,bold] PREFIX #[fg=#a3aed2#,nobold],}  %H:%M #[fg=#212736,bg=#1d2230]${plRCap}"
       set -g status-right-length 60
 
       # Windows: #W is the window NAME, so a manual rename sticks (see
       # automatic-rename below). Current window on light lavender, others slate.
-      setw -g window-status-format "#[fg=#394260,bg=#1d2230]#[fg=#a0a9cb,bg=#394260] #I:#W #[fg=#394260,bg=#1d2230]"
-      setw -g window-status-current-format "#[fg=#a3aed2,bg=#1d2230]#[fg=#090c0c,bg=#a3aed2,bold] #I:#W #[fg=#a3aed2,bg=#1d2230,nobold]"
-      setw -g window-status-separator " "
+      setw -g window-status-format "#[fg=#a0a9cb,bg=#1d2230] #I:#W "
+      setw -g window-status-current-format "#[fg=#a3aed2,bg=#1d2230]${plLeft}#[fg=#090c0c,bg=#a3aed2,bold] #I:#W #[fg=#a3aed2,bg=#1d2230,nobold]${plRight}"
+      setw -g window-status-separator ""
 
       # Keep manually-set window names.
       #   automatic-rename: tmux renaming the window to the running command -
@@ -531,11 +540,16 @@
     enable = true;
 
     settings = {
-      ipc = "on";
       splash = false;
 
-      preload = [ "${config.home.homeDirectory}/Pictures/wallpapers/dragon.jpg" ];
-      wallpaper = [ ",${config.home.homeDirectory}/Pictures/wallpapers/dragon.jpg" ];
+      # hyprpaper 0.8.x config shape. An empty `monitor` means every output.
+      wallpaper = [
+        {
+          monitor = "";
+          path = "${config.home.homeDirectory}/Pictures/wallpapers/dragon.jpg";
+          fit_mode = "cover";
+        }
+      ];
     };
   };
 }
