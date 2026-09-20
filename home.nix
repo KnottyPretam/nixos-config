@@ -5,8 +5,8 @@
   # Home Manager identity
   # ---------------------------------------------------------------------------
 
-  home.username = "pretam";
-  home.homeDirectory = "/home/pretam";
+  home.username = "pretamc";
+  home.homeDirectory = "/home/pretamc";
 
   # For a new installation created with NixOS 26.05.
   # Once set, do not routinely change this during upgrades.
@@ -63,7 +63,7 @@
 
     # Git utilities
     git-lfs
-    git-delta
+    delta
     lazygit
 
     # Build and development tools
@@ -84,7 +84,7 @@
     # Shell and Nix tools
     shellcheck
     shfmt
-    nixfmt-rfc-style
+    nixfmt
     nil
 
     # Fonts
@@ -301,53 +301,21 @@
   # ---------------------------------------------------------------------------
   # Neovim
   # ---------------------------------------------------------------------------
-
   programs.neovim = {
     enable = true;
-
+  
     defaultEditor = true;
     viAlias = true;
     vimAlias = true;
     vimdiffAlias = true;
-
+  
     withNodeJs = true;
     withPython3 = true;
-
-    # This is the Neovim half of seamless Neovim/tmux navigation.
-    plugins = with pkgs.vimPlugins; [
-      vim-tmux-navigator
-    ];
-
-    extraLuaConfig = ''
-      vim.g.mapleader = " "
-      vim.g.maplocalleader = " "
-
-      vim.opt.number = true
-      vim.opt.relativenumber = true
-      vim.opt.mouse = "a"
-      vim.opt.clipboard = "unnamedplus"
-
-      vim.opt.expandtab = true
-      vim.opt.shiftwidth = 4
-      vim.opt.tabstop = 4
-      vim.opt.smartindent = true
-
-      vim.opt.ignorecase = true
-      vim.opt.smartcase = true
-
-      vim.opt.termguicolors = true
-      vim.opt.signcolumn = "yes"
-      vim.opt.scrolloff = 8
-      vim.opt.sidescrolloff = 8
-
-      vim.opt.undofile = true
-      vim.opt.swapfile = false
-      vim.opt.updatetime = 250
-
-      vim.keymap.set("n", "<leader>w", "<cmd>write<cr>")
-      vim.keymap.set("n", "<leader>q", "<cmd>quit<cr>")
-      vim.keymap.set("n", "<leader>e", vim.cmd.Ex)
-    '';
+  };
+  
+  xdg.configFile."nvim" = {
+    source = ./dotfiles/nvim;
+    recursive = true;
   };
 
   # ---------------------------------------------------------------------------

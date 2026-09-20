@@ -26,7 +26,7 @@
             home-manager.useUserPackages = true;
             home-manager.backupFileExtension = "hm-backup";
 
-            home-manager.users.pretam = import ./home.nix;
+            home-manager.users.pretamc = import ./home.nix;
           }
         ];
       };

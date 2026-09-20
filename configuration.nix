@@ -19,7 +19,7 @@
 
   time.timeZone = "America/Phoenix";
 
-  users.users.pretam = {
+  users.users.pretamc = {
     isNormalUser = true;
     description = "Pretam";
     extraGroups = [
