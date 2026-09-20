@@ -31,7 +31,6 @@
     # NOTE: waybar and mako are installed by programs.waybar / services.mako
     # below, not here, so they get systemd user units.
     fuzzel
-    hyprpaper
     networkmanagerapplet
     pavucontrol
     brightnessctl
@@ -100,6 +99,11 @@
   ];
 
   fonts.fontconfig.enable = true;
+
+  # Wallpaper lives in the repo, so a fresh machine gets it from the flake.
+  # Materializing it at a fixed path (rather than referencing the /nix/store
+  # path directly) lets hyprpaper.conf and hyprlock.conf name it literally.
+  home.file."Pictures/wallpapers/dragon.jpg".source = ./wallpapers/dragon.jpg;
 
   # ---------------------------------------------------------------------------
   # Bash
@@ -360,32 +364,45 @@
       bind c new-window -c "#{pane_current_path}"
 
       # ---------------------------------------------------------------------
-      # Status bar - Gruvbox Dark Hard, same palette as ghostty and starship.
+      # Status bar - Tokyo Night, using the exact palette from starship's
+      # tokyo-night preset:
+      #   #a3aed2  light lavender   #769ff0  blue
+      #   #394260  slate            #212736  darker
+      #   #1d2230  darkest (bar bg) #e3e5e5  near-white
       # ---------------------------------------------------------------------
       set-option -g status-position top
       set -g status-interval 5
       set -g status-justify left
-      set -g status-style "bg=#1d2021,fg=#a89984"
+      set -g status-style "bg=#1d2230,fg=#a0a9cb"
 
-      # Left: session name on gruvbox blue.
-      set -g status-left "#[fg=#1d2021,bg=#83a598,bold]  #S #[default] "
+      # Left: session name on tokyo-night blue, closed with a powerline chevron.
+      set -g status-left "#[fg=#090c0c,bg=#769ff0,bold]  #S #[fg=#769ff0,bg=#1d2230,nobold]"
       set -g status-left-length 40
 
-      # Right: prefix indicator (yellow when armed), then the clock.
-      set -g status-right "#[fg=#928374]#{?client_prefix,#[fg=#fabd2f#,bold]PREFIX #[default]#[fg=#928374],}#[fg=#ebdbb2,bold]%H:%M "
+      # Right: prefix indicator when armed, then the clock on the slate segment.
+      set -g status-right "#[fg=#212736,bg=#1d2230]#[fg=#a3aed2,bg=#212736]#{?client_prefix,#[fg=#ff9e64#,bold] PREFIX #[fg=#a3aed2#,nobold],}  %H:%M "
       set -g status-right-length 60
 
-      # Windows: current one on gruvbox green, others dim.
-      setw -g window-status-format "#[fg=#928374] #I:#W "
-      setw -g window-status-current-format "#[fg=#1d2021,bg=#b8bb26,bold] #I:#W #[default]"
-      setw -g window-status-separator ""
+      # Windows: #W is the window NAME, so a manual rename sticks (see
+      # automatic-rename below). Current window on light lavender, others slate.
+      setw -g window-status-format "#[fg=#394260,bg=#1d2230]#[fg=#a0a9cb,bg=#394260] #I:#W #[fg=#394260,bg=#1d2230]"
+      setw -g window-status-current-format "#[fg=#a3aed2,bg=#1d2230]#[fg=#090c0c,bg=#a3aed2,bold] #I:#W #[fg=#a3aed2,bg=#1d2230,nobold]"
+      setw -g window-status-separator " "
+
+      # Keep manually-set window names.
+      #   automatic-rename: tmux renaming the window to the running command -
+      #     this was ON, which is what wiped names set with prefix + ,
+      #   allow-rename: the same thing driven by an app escape sequence.
+      setw -g automatic-rename off
+      set -g allow-rename off
+      set -g set-titles off
 
       # Panes, messages, copy mode.
-      set -g pane-border-style "fg=#3c3836"
-      set -g pane-active-border-style "fg=#83a598"
-      set -g message-style "bg=#3c3836,fg=#ebdbb2"
-      set -g message-command-style "bg=#3c3836,fg=#ebdbb2"
-      setw -g mode-style "bg=#458588,fg=#ebdbb2"
+      set -g pane-border-style "fg=#394260"
+      set -g pane-active-border-style "fg=#769ff0"
+      set -g message-style "bg=#394260,fg=#e3e5e5"
+      set -g message-command-style "bg=#394260,fg=#e3e5e5"
+      setw -g mode-style "bg=#769ff0,fg=#090c0c"
     '';
   };
 
@@ -510,4 +527,16 @@
     ./dotfiles/waybar/.config/waybar/style.css;
 
   services.mako.enable = true;
+
+  services.hyprpaper = {
+    enable = true;
+
+    settings = {
+      ipc = "on";
+      splash = false;
+
+      preload = [ "${config.home.homeDirectory}/Pictures/wallpapers/dragon.jpg" ];
+      wallpaper = [ ",${config.home.homeDirectory}/Pictures/wallpapers/dragon.jpg" ];
+    };
+  };
 }
