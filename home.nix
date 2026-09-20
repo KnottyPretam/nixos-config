@@ -68,7 +68,6 @@
 
     # Build and development tools
     gcc
-    clang
     clang-tools
     gnumake
     cmake
