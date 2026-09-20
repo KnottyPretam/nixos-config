@@ -1,6 +1,73 @@
 { config, pkgs, inputs, ... }:
 
 let
+  # ---------------------------------------------------------------------------
+  # AI scratchpad
+  #
+  # `show` is the primitive: make one app's overlay visible, launching it first
+  # if it is not running. It is IDEMPOTENT - calling it on an already-visible
+  # overlay does nothing, which is what a launcher entry needs.
+  #
+  # `cycle` (SUPER+G) picks the next app and delegates to `show`, so the
+  # app->command mapping exists in exactly one place.
+  # ---------------------------------------------------------------------------
+
+  aiScratchpadShow = pkgs.writeShellScriptBin "ai-scratchpad-show" ''
+    set -eu
+    ws="''${1:?usage: ai-scratchpad-show ai-chatgpt|ai-claude|ai-grok}"
+
+    # `size` takes a muParser expression in Hyprland 0.56 - percentages
+    # silently no-op. monitor_w/monitor_h are the LOGICAL size, so this is
+    # scale-correct.
+    RULES='float; center; size monitor_w*0.6 monitor_h*0.75'
+
+    case "$ws" in
+      ai-chatgpt) cmd='chatgpt' ;;
+      ai-claude)  cmd='claude-desktop' ;;
+      ai-grok)    cmd='chromium --app=https://grok.com --class=grok' ;;
+      *) echo "unknown scratchpad: $ws" >&2; exit 1 ;;
+    esac
+
+    n=$(hyprctl clients -j \
+      | jq --arg w "special:$ws" '[.[] | select(.workspace.name == $w)] | length')
+    cur=$(hyprctl monitors -j \
+      | jq -r 'first(.[] | select(.focused)) | .specialWorkspace.name // ""')
+
+    if [ "$n" -eq 0 ]; then
+      # Bracket exec-rules split on ';' (not ','), and attach by PID+token
+      # rather than window class - which is why the unknown app_ids of the two
+      # flake apps do not matter. No `silent`: mapping the window opens its
+      # special workspace and focuses it, which is what we want here.
+      hyprctl dispatch exec "[workspace special:$ws; $RULES] $cmd"
+    elif [ "$cur" != "special:$ws" ]; then
+      # Dispatch the BARE name - the dispatcher prepends "special:" itself.
+      hyprctl dispatch togglespecialworkspace "$ws"
+    fi
+    # Already visible: do nothing.
+  '';
+
+  aiScratchpadCycle = pkgs.writeShellScriptBin "ai-scratchpad-cycle" ''
+    set -eu
+
+    # Reports the prefixed name, or "" when no special workspace is open.
+    cur=$(hyprctl monitors -j \
+      | jq -r 'first(.[] | select(.focused)) | .specialWorkspace.name // ""')
+
+    case "$cur" in
+      special:ai-chatgpt) next=ai-claude ;;
+      special:ai-claude)  next=ai-grok ;;
+      # Last step: close the overlay. Hyprland restores focus to whatever was
+      # focused on the underlying workspace.
+      special:ai-grok)    hyprctl dispatch togglespecialworkspace ai-grok; exit 0 ;;
+      *)                  next=ai-chatgpt ;;
+    esac
+
+    # Absolute store path so this does not depend on PATH.
+    exec ${aiScratchpadShow}/bin/ai-scratchpad-show "$next"
+  '';
+in
+
+let
   # Powerline separators. Built from \u escapes rather than pasted literally:
   # these live in the Unicode Private Use Area and are easy to mangle when the
   # file is edited by tools that normalise text.
@@ -60,46 +127,8 @@ in
     # a `$NAME` substring substitution (colliding with $PATH, $HOME and the
     # config's own $menu/$mainMod), a bare `#` truncates the line anywhere, and
     # `{{ }}` is hyprlang's own expression syntax.
-    (pkgs.writeShellScriptBin "ai-scratchpad-cycle" ''
-      set -eu
-
-      # `size` takes a muParser expression in Hyprland 0.56 - percentages
-      # silently no-op. monitor_w/monitor_h are the LOGICAL size, so this is
-      # scale-correct.
-      RULES='float; center; size monitor_w*0.6 monitor_h*0.75'
-
-      # Reports the prefixed name, or "" when no special workspace is open.
-      cur=$(hyprctl monitors -j \
-        | jq -r 'first(.[] | select(.focused)) | .specialWorkspace.name // ""')
-
-      case "$cur" in
-        special:ai-chatgpt) next=ai-claude ;;
-        special:ai-claude)  next=ai-grok ;;
-        # Last step: close the overlay. Hyprland restores focus to whatever was
-        # focused on the underlying workspace.
-        special:ai-grok)    hyprctl dispatch togglespecialworkspace ai-grok; exit 0 ;;
-        *)                  next=ai-chatgpt ;;
-      esac
-
-      n=$(hyprctl clients -j \
-        | jq --arg w "special:$next" '[.[] | select(.workspace.name == $w)] | length')
-
-      if [ "$n" -eq 0 ]; then
-        case "$next" in
-          ai-chatgpt) cmd='chatgpt' ;;
-          ai-claude)  cmd='claude-desktop' ;;
-          ai-grok)    cmd='chromium --app=https://grok.com --class=grok' ;;
-        esac
-        # Bracket exec-rules split on ';' (not ','), and attach by PID+token
-        # rather than window class - which is why the unknown app_ids of the
-        # two flake apps do not matter. No `silent`: mapping the window opens
-        # its special workspace and focuses it, which is what we want here.
-        hyprctl dispatch exec "[workspace special:$next; $RULES] $cmd"
-      else
-        # Dispatch the BARE name - the dispatcher prepends "special:" itself.
-        hyprctl dispatch togglespecialworkspace "$next"
-      fi
-    '')
+    aiScratchpadShow
+    aiScratchpadCycle
 
     # Hyprland desktop utilities
     # NOTE: waybar and mako are installed by programs.waybar / services.mako
@@ -650,11 +679,96 @@ in
   # the XCURSOR_SIZE / HYPRCURSOR_SIZE already exported in hyprland.conf.
   # Do NOT also set gtk.cursorTheme - this owns that.
   home.pointerCursor = {
+    enable = true;
     package = pkgs.bibata-cursors;
     name = "Bibata-Modern-Classic";
     size = 24;
     gtk.enable = true;
     x11.enable = true;
+  };
+
+  # ---------------------------------------------------------------------------
+  # Default applications
+  #
+  # Without an explicit http/https default, resolution falls through to
+  # mimeinfo.cache, where chatgpt.desktop is first in the candidate list - it
+  # legitimately declares http;https, as OpenAI's upstream entry does. The
+  # result was that every OAuth `openExternal` launched ChatGPT instead of a
+  # browser, so signing in to Claude and ChatGPT could never complete.
+  # ---------------------------------------------------------------------------
+
+  # xdg.desktopEntries below is gated on this; without it the entries are
+  # silently not generated at all.
+  xdg.enable = true;
+
+  xdg.mimeApps = {
+    enable = true;
+
+    defaultApplications = {
+      "x-scheme-handler/http" = "firefox.desktop";
+      "x-scheme-handler/https" = "firefox.desktop";
+      "x-scheme-handler/about" = "firefox.desktop";
+      "x-scheme-handler/unknown" = "firefox.desktop";
+      "text/html" = "firefox.desktop";
+
+      # Deep links the apps registered for themselves. Carried over from the
+      # pre-existing ~/.config/mimeapps.list so OAuth callbacks still land.
+      "x-scheme-handler/claude" = "com.anthropic.Claude.desktop";
+      "x-scheme-handler/codex" = "chatgpt.desktop";
+      "x-scheme-handler/claude-cli" = "claude-code-url-handler.desktop";
+    };
+  };
+
+  # ---------------------------------------------------------------------------
+  # Launcher entries for the three AI apps
+  #
+  # These shadow the packages' own entries by ID ($XDG_DATA_HOME precedes
+  # XDG_DATA_DIRS). Without them, launching from rofi runs the app binary, the
+  # Electron single-instance handler refocuses the existing window, and that
+  # window is parked on a hidden special workspace - so nothing appears. Routing
+  # through ai-scratchpad-show makes rofi and SUPER+G behave identically.
+  # ---------------------------------------------------------------------------
+
+  xdg.desktopEntries = {
+    chatgpt = {
+      name = "ChatGPT";
+      genericName = "AI assistant";
+      comment = "ChatGPT by OpenAI";
+      icon = "chatgpt";
+      exec = "ai-scratchpad-show ai-chatgpt";
+      type = "Application";
+      categories = [ "Utility" "Development" ];
+
+      # http/https deliberately NOT declared here - that candidacy is what
+      # hijacked the browser. codex:// is kept so OAuth callbacks still land.
+      mimeType = [ "x-scheme-handler/codex" ];
+
+      settings.StartupWMClass = "Chatgpt"; # upstream omits this; waybar needs it
+    };
+
+    "com.anthropic.Claude" = {
+      name = "Claude";
+      genericName = "AI Assistant";
+      comment = "Desktop application for Claude.ai";
+      icon = "claude-desktop";
+      exec = "ai-scratchpad-show ai-claude";
+      type = "Application";
+      categories = [ "Utility" "Development" ];
+      mimeType = [ "x-scheme-handler/claude" ];
+      settings.StartupWMClass = "com.anthropic.Claude";
+    };
+
+    # Grok ships no .desktop at all, so it never appeared in the launcher.
+    grok = {
+      name = "Grok";
+      genericName = "AI assistant";
+      comment = "Grok by xAI";
+      icon = "chromium";
+      exec = "ai-scratchpad-show ai-grok";
+      type = "Application";
+      categories = [ "Utility" ];
+      settings.StartupWMClass = "chrome-grok.com__-Default";
+    };
   };
 
   services.hyprpaper = {

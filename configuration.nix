@@ -75,6 +75,11 @@
     };
   };
 
+  # Both Electron AI apps gate their Wayland backend behind this; without it
+  # they run on XWayland, which is visibly blurry on this 1.5x scaled display.
+  # Revert this single line if either app misbehaves on native Wayland.
+  environment.sessionVariables.NIXOS_OZONE_WL = "1";
+
   security.rtkit.enable = true;
   security.polkit.enable = true;
 
