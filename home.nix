@@ -28,9 +28,9 @@
     claude-code
 
     # Hyprland desktop utilities
-    waybar
+    # NOTE: waybar and mako are installed by programs.waybar / services.mako
+    # below, not here, so they get systemd user units.
     fuzzel
-    mako
     hyprpaper
     networkmanagerapplet
     pavucontrol
@@ -43,6 +43,8 @@
     grim
     slurp
     swappy
+    grimblast
+    yazi
 
     # Terminal utilities
     ripgrep
@@ -305,19 +307,34 @@
   # ---------------------------------------------------------------------------
   programs.neovim = {
     enable = true;
-  
+
     defaultEditor = true;
     viAlias = true;
     vimAlias = true;
     vimdiffAlias = true;
-  
+
     withNodeJs = true;
     withPython3 = true;
+
+    # The neovim module owns ~/.config/nvim/init.lua (it writes the node/python
+    # provider stanzas there), so the dotfile init.lua has to go through
+    # extraLuaConfig rather than a competing xdg.configFile entry.
+    extraLuaConfig = builtins.readFile ./dotfiles/nvim/.config/nvim/init.lua;
   };
-  
-  xdg.configFile."nvim" = {
-    source = ./dotfiles/nvim;
-    recursive = true;
+
+  # Everything else under ~/.config/nvim. Note these paths point at the *inner*
+  # .config/nvim of the stow package, not the package root.
+  #
+  # lazy-lock.json and harper-dict.txt are deliberately NOT managed here: lazy
+  # rewrites the lockfile on :Lazy sync/update and harper appends to the
+  # dictionary, and a read-only /nix/store symlink would make those writes fail.
+  xdg.configFile = {
+    "nvim/lua" = {
+      source = ./dotfiles/nvim/.config/nvim/lua;
+      recursive = true;
+    };
+
+    "nvim/.luarc.json".source = ./dotfiles/nvim/.config/nvim/.luarc.json;
   };
 
   # ---------------------------------------------------------------------------
@@ -464,4 +481,66 @@
   programs.firefox = {
     enable = true;
   };
+
+  # ---------------------------------------------------------------------------
+  # Hyprland desktop
+  #
+  # The .conf files under ./dotfiles/hypr are the source of truth; Home Manager
+  # materializes them verbatim into ~/.config/hypr so a rebuild on any machine
+  # reproduces the desktop exactly.
+  # ---------------------------------------------------------------------------
+
+  wayland.windowManager.hyprland = {
+    enable = true;
+
+    # Hyprland and its portal come from programs.hyprland in configuration.nix.
+    package = null;
+    portalPackage = null;
+
+    # uwsm owns graphical-session.target; don't let Home Manager create a
+    # competing hyprland-session.target.
+    systemd.enable = false;
+
+    # home.stateVersion 26.05 defaults this to "lua", which would write our
+    # hyprlang config verbatim into hyprland.lua and fail to parse. The dotfile
+    # is hyprlang, so write hyprland.conf.
+    configType = "hyprlang";
+
+    extraConfig = builtins.readFile ./dotfiles/hypr/.config/hypr/hyprland.conf;
+  };
+
+  # `settings` is deliberately left empty: the module only generates
+  # hypr/hypridle.conf when settings is non-empty, so the verbatim dotfile below
+  # stands while we still get the systemd user unit.
+  services.hypridle.enable = true;
+
+  xdg.configFile."hypr/hypridle.conf".source =
+    ./dotfiles/hypr/.config/hypr/hypridle.conf;
+
+  programs.hyprlock = {
+    enable = true;
+
+    # Provided system-wide by programs.hyprlock in configuration.nix, which also
+    # sets up PAM.
+    package = null;
+
+    extraConfig = builtins.readFile ./dotfiles/hypr/.config/hypr/hyprlock.conf;
+  };
+
+  programs.waybar = {
+    enable = true;
+    systemd.enable = true;
+
+    # `settings` and `style` are left unset on purpose: the module only writes
+    # waybar/config and waybar/style.css when they are non-empty, so the
+    # verbatim dotfiles below own those paths.
+  };
+
+  xdg.configFile."waybar/config.jsonc".source =
+    ./dotfiles/waybar/.config/waybar/config.jsonc;
+
+  xdg.configFile."waybar/style.css".source =
+    ./dotfiles/waybar/.config/waybar/style.css;
+
+  services.mako.enable = true;
 }

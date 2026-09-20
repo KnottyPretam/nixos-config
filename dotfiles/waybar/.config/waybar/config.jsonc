@@ -1,0 +1,75 @@
+// Minimal top bar: audio out, mic, wifi (icon only, hidden when down), clock.
+{
+  "layer": "top",
+  "position": "top",
+  "height": 32,
+  "spacing": 4,
+
+  "modules-left": [],
+  "modules-center": [],
+  "modules-right": [
+    "pulseaudio",
+    "pulseaudio#mic",
+    "network",
+    "battery",
+    "clock"
+  ],
+
+  // Speaker volume.
+  "pulseaudio": {
+    "format": "{icon}  {volume}%",
+    "format-muted": "󰝟  muted",
+    "format-icons": {
+      "headphone": "󰋋",
+      "headset": "󰋎",
+      "default": ["󰕿", "󰖀", "󰕾"]
+    },
+    "on-click": "pavucontrol",
+    "on-scroll-up": "wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+",
+    "on-scroll-down": "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-",
+    "tooltip": false
+  },
+
+  // Microphone. Same module, rendered from the source side.
+  "pulseaudio#mic": {
+    "format": "{format_source}",
+    "format-source": "󰍬  {volume}%",
+    "format-source-muted": "󰍭  muted",
+    "on-click": "wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle",
+    "tooltip": false
+  },
+
+  // Icon only, no SSID. Empty format => module renders nothing when down.
+  "network": {
+    "format-wifi": "󰖩",
+    "format-ethernet": "󰈀",
+    "format-linked": "",
+    "format-disconnected": "",
+    "on-click": "nm-connection-editor",
+    "tooltip": false
+  },
+
+  // Discharging shows a level icon; charging/plugged show a distinct symbol.
+  "battery": {
+    "states": {
+      "warning": 25,
+      "critical": 15
+    },
+    "format": "{icon}  {capacity}%",
+    "format-charging": "󰂄  {capacity}%",
+    "format-plugged": "󰚥  {capacity}%",
+    "format-full": "󰂄  {capacity}%",
+    "format-icons": [
+      "󰂎", "󰁺", "󰁻", "󰁼", "󰁽",
+      "󰁾", "󰁿", "󰂀", "󰂁", "󰂂",
+      "󰁹"
+    ],
+    "tooltip": false
+  },
+
+  "clock": {
+    "format": "{:%H:%M}",
+    "format-alt": "{:%a %d %b  %H:%M}",
+    "tooltip": false
+  }
+}

@@ -38,6 +38,11 @@
     withUWSM = true;
   };
 
+  # Installs hyprlock system-wide and registers security.pam.services.hyprlock.
+  # Without that PAM entry the lock screen cannot authenticate and you would be
+  # locked out of your own session.
+  programs.hyprlock.enable = true;
+
   # Graphical login screen
   services.displayManager.sddm = {
     enable = true;

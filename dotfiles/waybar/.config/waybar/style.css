@@ -1,0 +1,48 @@
+/* Gruvbox Dark Hard, matching programs.ghostty and programs.starship. */
+
+* {
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 13px;
+  border: none;
+  border-radius: 0;
+  min-height: 0;
+}
+
+window#waybar {
+  background: #1d2021;
+  color: #ebdbb2;
+}
+
+#pulseaudio,
+#network,
+#battery,
+#clock {
+  padding: 0 10px;
+}
+
+#pulseaudio         { color: #d79921; }
+#pulseaudio.mic     { color: #b16286; }
+#network            { color: #83a598; }
+#battery            { color: #b8bb26; }
+
+/* Plugged in / charging reads distinctly from on-battery. */
+#battery.charging,
+#battery.plugged,
+#battery.full {
+  color: #8ec07c;
+}
+
+#battery.warning:not(.charging)  { color: #fabd2f; }
+#battery.critical:not(.charging) { color: #fb4934; }
+
+#clock {
+  color: #ebdbb2;
+  font-weight: bold;
+  padding-right: 14px;
+}
+
+/* Muted states dim rather than shout. */
+#pulseaudio.muted,
+#pulseaudio.source-muted {
+  color: #928374;
+}
