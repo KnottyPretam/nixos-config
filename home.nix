@@ -422,10 +422,9 @@
       "window-padding-y" = 8;
 
       # ~30% transparent so the wallpaper shows through slightly.
-      # background-blur softens whatever is behind it; drop it if you want the
-      # background perfectly sharp.
+      # background-blur is deliberately NOT set: on some ghostty builds it
+      # conflicts with Hyprland's own blur and the window renders solid.
       "background-opacity" = 0.7;
-      "background-blur" = true;
 
       "cursor-style" = "block";
       "cursor-style-blink" = false;
