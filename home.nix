@@ -1,4 +1,4 @@
-{ config, pkgs, inputs, ... }:
+{ config, pkgs, ... }:
 
 let
   # ---------------------------------------------------------------------------
@@ -14,33 +14,43 @@ let
 
   aiScratchpadShow = pkgs.writeShellScriptBin "ai-scratchpad-show" ''
     set -eu
-    ws="''${1:?usage: ai-scratchpad-show <ai-chatgpt|ai-claude|ai-grok> [url]}"
-    shift || true
-    url="''${1:-}"
+    ws="''${1:?usage: ai-scratchpad-show <ai-chatgpt|ai-claude|ai-grok>}"
 
     # `size` takes a muParser expression in Hyprland 0.56 - percentages
     # silently no-op. monitor_w/monitor_h are the LOGICAL size, so this is
     # scale-correct.
     RULES='float; center; size monitor_w*0.6 monitor_h*0.75'
 
-    # `bin` is the plain binary used to hand a deep link to an already-running
-    # instance. Grok is a Chromium web-app and has no scheme handler, so it has
-    # no bin.
-    # `cls` is the live Wayland app_id, used only to RECOVER a window that has
-    # drifted off its special workspace (which happens when a deep link or a
-    # stray launch pulls it out). Placement still relies on PID+token exec
-    # rules, not on class.
+    # All three AIs are now Chromium --app= web-apps. `prof` is the per-app
+    # --user-data-dir, which is what keeps the three logins isolated from one
+    # another and from the ordinary browser profile. There is no `bin` and no
+    # deep-link branch any more: a Chromium web-app registers no scheme
+    # handler, so nothing can hand it an OAuth callback.
     case "$ws" in
-      ai-chatgpt) bin='chatgpt';        cmd="$bin"; cls='Chatgpt' ;;
-      ai-claude)  bin='claude-desktop'; cmd="$bin"; cls='com.anthropic.Claude' ;;
-      ai-grok)    bin="";               cls='chrome-grok.com__-Default'
-                  cmd='chromium --app=https://grok.com --class=grok' ;;
+      ai-chatgpt) url='https://chatgpt.com'; prof='chatgpt' ;;
+      ai-claude)  url='https://claude.ai';   prof='claude' ;;
+      ai-grok)    url='https://grok.com';    prof='grok' ;;
       *) echo "unknown scratchpad: $ws" >&2; exit 1 ;;
     esac
 
+    # Chromium derives an app window's app_id from the --app= URL - NOT from
+    # --class, which it ignores under Wayland - and appends the PROFILE
+    # DIRECTORY basename, which is "Default" inside any --user-data-dir. So a
+    # private --user-data-dir does not change the class. Two footguns, both
+    # observed live on Hyprland 0.56.2 / Chromium 153: --profile-directory=AI
+    # yields chrome-claude.ai__-AI, and a path in the URL becomes part of the
+    # id (https://claude.ai/new -> chrome-claude.ai__new-Default). Keep the
+    # URLs bare origins and never add --profile-directory.
+    host="''${url#https://}"
+    host="''${host%%/*}"
+    cls="chrome-''${host}__-Default"
+
+    dir="$HOME/.local/share/webapps/$prof"
+    cmd="chromium --app=$url --user-data-dir=$dir --no-first-run --no-default-browser-check"
+
     # Find an existing window for this app ANYWHERE, not just on its own
     # special workspace - otherwise a drifted window looks like "not running",
-    # we relaunch, Electron single-instance swallows it, and nothing appears.
+    # we relaunch, and a second instance lands in the wrong place.
     addr=$(hyprctl clients -j \
       | jq -r --arg c "$cls" 'first(.[] | select(.class == $c)) | .address // ""')
     at=$(hyprctl clients -j \
@@ -55,30 +65,16 @@ let
 
     if [ -z "$addr" ]; then
       # Bracket exec-rules split on ';' (not ','), and attach by PID+token
-      # rather than window class - which is why the unknown app_ids of the two
-      # flake apps do not matter. No `silent`: mapping the window opens its
+      # rather than window class. No `silent`: mapping the window opens its
       # special workspace and focuses it, which is what we want here.
-      if [ -n "$url" ] && [ -n "$bin" ]; then
-        hyprctl dispatch exec "[workspace special:$ws; $RULES] $bin '$url'"
-      else
-        hyprctl dispatch exec "[workspace special:$ws; $RULES] $cmd"
-      fi
-    else
-      # Already running. A deep link (an OAuth callback such as claude://...)
-      # must be handed to the live instance, or sign-in silently never
-      # completes. Invoked directly rather than through hyprctl so the URL
-      # keeps normal shell quoting.
-      if [ -n "$url" ] && [ -n "$bin" ]; then
-        "$bin" "$url" >/dev/null 2>&1 &
-      fi
-      if [ "$cur" != "special:$ws" ]; then
-        # Dispatch the BARE name - the dispatcher prepends "special:" itself.
-        hyprctl dispatch togglespecialworkspace "$ws"
-      fi
+      mkdir -p "$dir"
+      hyprctl dispatch exec "[workspace special:$ws; $RULES] $cmd"
+    elif [ "$cur" != "special:$ws" ]; then
+      # Dispatch the BARE name - the dispatcher prepends "special:" itself.
+      hyprctl dispatch togglespecialworkspace "$ws"
     fi
-    # Already visible and no url: do nothing.
+    # Already visible: do nothing.
   '';
-
   aiScratchpadCycle = pkgs.writeShellScriptBin "ai-scratchpad-cycle" ''
     set -eu
 
@@ -143,11 +139,8 @@ in
     # Agents
     claude-code
 
-    # Claude and ChatGPT desktop apps, from the flake inputs. Grok has no
-    # desktop client on any platform, so it runs as a Chromium web-app - see
-    # the ai-scratchpad-cycle script below.
-    inputs.claude-desktop.packages.${pkgs.stdenv.hostPlatform.system}.claude-desktop
-    inputs.chatgpt-desktop.packages.${pkgs.stdenv.hostPlatform.system}.chatgpt-desktop
+    # All three AI apps are Chromium web-apps with isolated --user-data-dir
+    # profiles - see the ai-scratchpad-show script above.
     chromium
 
     # SUPER+G cycles a centered AI overlay: ChatGPT -> Claude -> Grok -> back to
@@ -237,7 +230,7 @@ in
   # Wallpaper lives in the repo, so a fresh machine gets it from the flake.
   # Materializing it at a fixed path (rather than referencing the /nix/store
   # path directly) lets hyprpaper.conf and hyprlock.conf name it literally.
-  home.file."Pictures/wallpapers/dragon.jpg".source = ./wallpapers/dragon.jpg;
+  home.file."Pictures/wallpapers/blackhole.jpg".source = ./wallpapers/blackhole.jpg;
 
   # ---------------------------------------------------------------------------
   # Bash
@@ -734,6 +727,35 @@ in
   # silently not generated at all.
   xdg.enable = true;
 
+  # ---------------------------------------------------------------------------
+  # Launcher icons for the three AI web-apps
+  #
+  # The old `icon = "chatgpt"` / `icon = "claude-desktop"` names resolved only
+  # through the two flake packages that are now gone, so the icons are vendored
+  # in-repo instead.
+  #
+  # $XDG_DATA_HOME/icons is the FIRST entry in the icon-theme search path of
+  # every consumer here - GTK3/waybar, rofi (its vendored libnkutils calls
+  # try_dir(g_get_user_data_dir()) before anything else) and fuzzel - so these
+  # win over anything a package ships under the same name.
+  #
+  # No index.theme is needed here and no gtk-update-icon-cache step: the
+  # loaders read hicolor's index.theme from the first base dir that has one
+  # (the HM profile and /run/current-system/sw both do), then look for the
+  # subdirectories it lists in EVERY base dir, falling back to a directory scan
+  # when no cache is present. home-manager never generates a cache.
+  #
+  # Each PNG goes in the hicolor dir matching its real pixel size - claude is
+  # 256x256, grok is 32x32. chatgpt's art is 1024x1024, but hicolor's
+  # index.theme declares apps dirs only up to 512x512, so a 1024x1024 dir would
+  # never be searched.
+  # ---------------------------------------------------------------------------
+  xdg.dataFile = {
+    "icons/hicolor/256x256/apps/claude.png".source = ./icons/claude.png;
+    "icons/hicolor/512x512/apps/chatgpt.png".source = ./icons/chatgpt.png;
+    "icons/hicolor/32x32/apps/grok.png".source = ./icons/grok.png;
+  };
+
   xdg.mimeApps = {
     enable = true;
 
@@ -744,10 +766,13 @@ in
       "x-scheme-handler/unknown" = "firefox.desktop";
       "text/html" = "firefox.desktop";
 
-      # Deep links the apps registered for themselves. Carried over from the
-      # pre-existing ~/.config/mimeapps.list so OAuth callbacks still land.
-      "x-scheme-handler/claude" = "com.anthropic.Claude.desktop";
-      "x-scheme-handler/codex" = "chatgpt.desktop";
+      # The claude:// and codex:// handlers are gone with the Electron apps -
+      # a Chromium --app= window cannot service them.
+      #
+      # claude-cli:// stays: the Claude Code CLI writes that handler itself
+      # into ~/.local/share/applications/claude-code-url-handler.desktop (a
+      # real file the CLI owns, not a store symlink), so it is unrelated to the
+      # removed desktop packages.
       "x-scheme-handler/claude-cli" = "claude-code-url-handler.desktop";
     };
   };
@@ -755,11 +780,23 @@ in
   # ---------------------------------------------------------------------------
   # Launcher entries for the three AI apps
   #
-  # These shadow the packages' own entries by ID ($XDG_DATA_HOME precedes
-  # XDG_DATA_DIRS). Without them, launching from rofi runs the app binary, the
-  # Electron single-instance handler refocuses the existing window, and that
-  # window is parked on a hidden special workspace - so nothing appears. Routing
-  # through ai-scratchpad-show makes rofi and SUPER+G behave identically.
+  # Each entry routes through ai-scratchpad-show so rofi and SUPER+G behave
+  # identically: launching the app binary directly would leave the window
+  # parked on a hidden special workspace and nothing would appear.
+  #
+  # home-manager installs these into the HM PROFILE
+  # (/etc/profiles/per-user/pretamc/share/applications, because
+  # home-manager.useUserPackages = true) - NOT into $XDG_DATA_HOME - and they
+  # win over any package-supplied entry of the same ID through lib.hiPrio
+  # inside that one buildEnv.
+  #
+  # StartupWMClass values are the live Wayland app_ids, observed with hyprctl
+  # clients on Hyprland 0.56.2 / Chromium 153. They are derived from the --app=
+  # URL, not from --class.
+  #
+  # No mimeType and no %U: these are web-apps now, with no scheme handler to
+  # advertise. Declaring one would put a dead OAuth route back into
+  # mimeinfo.cache.
   # ---------------------------------------------------------------------------
 
   xdg.desktopEntries = {
@@ -768,56 +805,35 @@ in
       genericName = "AI assistant";
       comment = "ChatGPT by OpenAI";
       icon = "chatgpt";
-      exec = "ai-scratchpad-show ai-chatgpt %U";
+      exec = "ai-scratchpad-show ai-chatgpt";
       type = "Application";
+      terminal = false;
       categories = [ "Utility" "Development" ];
-
-      # http/https deliberately NOT declared here - that candidacy is what
-      # hijacked the browser. codex:// is kept so OAuth callbacks still land.
-      mimeType = [ "x-scheme-handler/codex" ];
-
-      settings.StartupWMClass = "Chatgpt"; # upstream omits this; waybar needs it
+      settings.StartupWMClass = "chrome-chatgpt.com__-Default";
     };
 
-    "com.anthropic.Claude" = {
+    claude = {
       name = "Claude";
-      genericName = "AI Assistant";
-      comment = "Desktop application for Claude.ai";
-      icon = "claude-desktop";
-      exec = "ai-scratchpad-show ai-claude %U";
+      genericName = "AI assistant";
+      comment = "Claude by Anthropic";
+      icon = "claude";
+      exec = "ai-scratchpad-show ai-claude";
       type = "Application";
+      terminal = false;
       categories = [ "Utility" "Development" ];
-      mimeType = [ "x-scheme-handler/claude" ];
-      settings.StartupWMClass = "com.anthropic.Claude";
+      settings.StartupWMClass = "chrome-claude.ai__-Default";
     };
 
-    # Grok ships no .desktop at all, so it never appeared in the launcher.
     grok = {
       name = "Grok";
       genericName = "AI assistant";
       comment = "Grok by xAI";
-      icon = "chromium";
+      icon = "grok";
       exec = "ai-scratchpad-show ai-grok";
       type = "Application";
+      terminal = false;
       categories = [ "Utility" ];
       settings.StartupWMClass = "chrome-grok.com__-Default";
-    };
-  };
-
-  services.hyprpaper = {
-    enable = true;
-
-    settings = {
-      splash = false;
-
-      # hyprpaper 0.8.x config shape. An empty `monitor` means every output.
-      wallpaper = [
-        {
-          monitor = "";
-          path = "${config.home.homeDirectory}/Pictures/wallpapers/dragon.jpg";
-          fit_mode = "cover";
-        }
-      ];
     };
   };
 }

@@ -1,45 +1,5 @@
 {
   "nodes": {
-    "chatgpt-desktop": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1789745576,
-        "narHash": "sha256-mnXe8lmdRgf9gd5UQXd3nd+SdX6hYAzzwKTt+hiDVTA=",
-        "owner": "danielbodart",
-        "repo": "chatgpt-desktop",
-        "rev": "fab8b3494fbbce6dfb303c27b9ecbfbc4ed8dfbd",
-        "type": "github"
-      },
-      "original": {
-        "owner": "danielbodart",
-        "repo": "chatgpt-desktop",
-        "type": "github"
-      }
-    },
-    "claude-desktop": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1789724860,
-        "narHash": "sha256-R9jJFMhB2P9tRsY1JRtE77Y80TCmQbwQqTa5P09oNFc=",
-        "owner": "danielbodart",
-        "repo": "claude-desktop",
-        "rev": "d4d383b9cd735875734397135a723ccf839eb361",
-        "type": "github"
-      },
-      "original": {
-        "owner": "danielbodart",
-        "repo": "claude-desktop",
-        "type": "github"
-      }
-    },
     "home-manager": {
       "inputs": {
         "nixpkgs": [
@@ -78,8 +38,6 @@
     },
     "root": {
       "inputs": {
-        "chatgpt-desktop": "chatgpt-desktop",
-        "claude-desktop": "claude-desktop",
         "home-manager": "home-manager",
         "nixpkgs": "nixpkgs"
       }
