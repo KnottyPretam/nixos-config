@@ -114,11 +114,19 @@
     historyFileSize = 100000;
 
     shellAliases = {
-      ls = "eza --icons";
+      # `ls` is deliberately NOT aliased: eza is not flag-compatible with GNU
+      # ls (eza's -t is --time=FIELD, so `ls -ltr` errors out). Leaving ls as
+      # the real thing keeps every familiar flag working; eza gets its own
+      # names below.
       l = "eza --icons";
       ll = "eza -lah --icons --git";
       la = "eza -a --icons";
+      lla = "eza -la --icons --git";
       lt = "eza --tree --level=2 --icons";
+
+      # GNU equivalents: `ls -ltr` and `ls -lt`.
+      ltr = "eza -l --icons --git --sort=date";
+      lnew = "eza -l --icons --git --sort=date --reverse";
 
       cat = "bat";
       grep = "rg";
@@ -235,7 +243,12 @@
 
   programs.eza = {
     enable = true;
-    enableBashIntegration = true;
+
+    # The module's bash integration unconditionally aliases `ls` to eza and
+    # offers no way to opt out of just that one alias, so integration is off
+    # and the aliases are declared in programs.bash.shellAliases instead.
+    enableBashIntegration = false;
+
     icons = "auto";
     git = true;
   };
@@ -358,16 +371,6 @@
     plugins = with pkgs.tmuxPlugins; [
       vim-tmux-navigator
 
-      {
-        plugin = catppuccin;
-
-        extraConfig = ''
-          set -g @catppuccin_flavor "latte"
-          set -g @catppuccin_window_status_style "rounded"
-          set -g @catppuccin_window_current_text "#W"
-        '';
-      }
-
       sessionist
       fpp
       open
@@ -418,13 +421,33 @@
       bind % split-window -h -c "#{pane_current_path}"
       bind c new-window -c "#{pane_current_path}"
 
-      # Status bar.
+      # ---------------------------------------------------------------------
+      # Status bar - Gruvbox Dark Hard, same palette as ghostty and starship.
+      # ---------------------------------------------------------------------
       set-option -g status-position top
-      set -g status-left ""
-      set -g status-right "#{E:@catppuccin_status_application} #{E:@catppuccin_status_session}"
+      set -g status-interval 5
+      set -g status-justify left
+      set -g status-style "bg=#1d2021,fg=#a89984"
 
-      # Retain the terminal background behind the status line.
-      set -g status-style bg=default
+      # Left: session name on gruvbox blue.
+      set -g status-left "#[fg=#1d2021,bg=#83a598,bold]  #S #[default] "
+      set -g status-left-length 40
+
+      # Right: prefix indicator (yellow when armed), then the clock.
+      set -g status-right "#[fg=#928374]#{?client_prefix,#[fg=#fabd2f#,bold]PREFIX #[default]#[fg=#928374],}#[fg=#ebdbb2,bold]%H:%M "
+      set -g status-right-length 60
+
+      # Windows: current one on gruvbox green, others dim.
+      setw -g window-status-format "#[fg=#928374] #I:#W "
+      setw -g window-status-current-format "#[fg=#1d2021,bg=#b8bb26,bold] #I:#W #[default]"
+      setw -g window-status-separator ""
+
+      # Panes, messages, copy mode.
+      set -g pane-border-style "fg=#3c3836"
+      set -g pane-active-border-style "fg=#83a598"
+      set -g message-style "bg=#3c3836,fg=#ebdbb2"
+      set -g message-command-style "bg=#3c3836,fg=#ebdbb2"
+      setw -g mode-style "bg=#458588,fg=#ebdbb2"
     '';
   };
 
