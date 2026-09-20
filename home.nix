@@ -24,6 +24,9 @@
   # ---------------------------------------------------------------------------
 
   home.packages = with pkgs; [
+    # Agents
+    claude-code
+
     # Hyprland desktop utilities
     waybar
     fuzzel
