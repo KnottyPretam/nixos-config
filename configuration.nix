@@ -19,6 +19,25 @@
   networking.hostName = "nixos";
   networking.networkmanager.enable = true;
 
+  # Tailscale runs a privileged daemon, so it belongs at the system level -
+  # putting the CLI in home.packages would give a `tailscale` with no tailscaled
+  # to talk to.
+  #
+  # NOTE: node authentication is deliberately NOT reproducible. Run
+  # `sudo tailscale up` once per machine; identity lives in /var/lib/tailscale.
+  # The alternative (authKeyFile) would mean committing a secret to this repo.
+  services.tailscale = {
+    enable = true;
+
+    # "client" = use exit nodes and subnet routes advertised by others.
+    # Use "server"/"both" only if this laptop should advertise routes itself.
+    useRoutingFeatures = "client";
+
+    # Opens the UDP port tailscaled uses for direct peer connections; without
+    # it traffic still works but falls back to a relay more often.
+    openFirewall = true;
+  };
+
   time.timeZone = "America/Phoenix";
 
   i18n.defaultLocale = "en_US.UTF-8";

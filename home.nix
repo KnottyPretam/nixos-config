@@ -205,11 +205,14 @@ in
   programs.home-manager.enable = true;
 
   # Make ~/.local/bin available for Claude Code and other user-installed tools.
+  # Only .local/bin survives: `uv tool install` targets it. The other three
+  # ($HOME/tools/bin, .npm-packages/bin, .grok/bin) were pre-Nix leftovers
+  # pointing at directories that do not exist - standing invitations for an
+  # imperative install that would vanish on another machine. .npm-packages/bin
+  # in particular can never be populated: npm's prefix is a read-only store
+  # path, so `npm -g` always fails here.
   home.sessionPath = [
     "$HOME/.local/bin"
-    "$HOME/tools/bin"
-    "$HOME/.npm-packages/bin"
-    "$HOME/.grok/bin"
   ];
 
   home.sessionVariables = {
@@ -309,6 +312,35 @@ in
     shfmt
     nixfmt
     nil
+
+    # Language servers. These replace the copies mason downloaded into
+    # ~/.local/share/nvim/mason, which are generic-linux ELF binaries and
+    # cannot execute on NixOS at all.
+    lua-language-server
+    harper # provides harper-ls
+    pyright
+    vscode-langservers-extracted # html / css / json / eslint
+
+    # Formatters and linters
+    prettier
+    stylua
+    ruff
+
+    # Python. uv rather than pip: per-project, lockfile-based environments,
+    # with no ~/.local/lib state to lose on a rebuild. Note bare `python3`
+    # ships no pip at all, and python3Full was removed from nixpkgs.
+    uv
+
+    # Rust. Required for avante.nvim's `make` build step, which has silently
+    # never produced its native library.
+    cargo
+    rustc
+
+    # JS runtimes and tooling (npm and npx already ship inside `nodejs`)
+    typescript
+    pnpm
+    bun
+    deno
   ];
 
   fonts.fontconfig.enable = true;

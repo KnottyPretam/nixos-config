@@ -53,7 +53,7 @@ return {
         timeout = 60000,
         -- Codex speaks the Responses API, not /chat/completions.
         use_response_api = true,
-        api_key_name = [[cmd:python3 -c "import json,sys;d=json.load(open('/home/pchoudhury/.codex/auth.json'));t=d.get('tokens') or {};sys.stdout.write(t.get('access_token') or d.get('OPENAI_API_KEY') or '')"]],
+        api_key_name = [[cmd:python3 -c "import json,os,sys;d=json.load(open(os.path.expanduser('~/.codex/auth.json')));t=d.get('tokens') or {};sys.stdout.write(t.get('access_token') or d.get('OPENAI_API_KEY') or '')"]],
         extra_headers = {
           ["chatgpt-account-id"] = codex_account_id(),
           ["OpenAI-Beta"] = "responses=experimental",

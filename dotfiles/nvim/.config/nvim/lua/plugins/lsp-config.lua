@@ -3,14 +3,19 @@ return {
     "williamboman/mason.nvim",
     lazy = false,
     config = function()
-      require("mason").setup()
+      -- PATH = "skip" is the fix. mason defaults to "prepend", which puts its
+      -- own generic-linux binaries ahead of the Nix ones on vim.env.PATH.
+      -- Those binaries cannot execute on NixOS, so mason's clangd was
+      -- shadowing the working clang-tools copy inside Neovim.
+      require("mason").setup({ PATH = "skip" })
     end,
   },
   {
     "williamboman/mason-lspconfig.nvim",
     lazy = false,
     opts = {
-      ensure_installed = { "lua_ls", "clangd", "harper_ls" },
+      -- Servers come from home.packages now; mason must not fetch its own.
+      ensure_installed = {},
       automatic_enable = false,
     },
   },
@@ -21,6 +26,10 @@ return {
       local capabilities = require("cmp_nvim_lsp").default_capabilities()
 
       vim.lsp.config("lua_ls", {
+        capabilities = capabilities,
+      })
+
+      vim.lsp.config("pyright", {
         capabilities = capabilities,
       })
 
@@ -63,6 +72,7 @@ return {
       })
 
       vim.lsp.enable("lua_ls")
+      vim.lsp.enable("pyright")
       vim.lsp.enable("clangd")
       vim.lsp.enable("harper_ls")
 
