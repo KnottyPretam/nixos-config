@@ -34,6 +34,9 @@ be re-attached after loading.
 - Viewing side (`show_figure.py`): `matplotlib` + `mplcursors`, and an
   interactive matplotlib backend (a GUI / display). Install with
   `pip install matplotlib mplcursors`.
+- **On NixOS, do not `pip install` them** — matplotlib's wheels link
+  `libstdc++`, which a venv there cannot find. The system `python3` already has
+  both (from `home.nix`), with the TkAgg backend, so run the viewer with it.
 
 ## How to apply this to a project
 

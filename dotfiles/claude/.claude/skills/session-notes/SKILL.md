@@ -7,8 +7,13 @@ description: >-
   save, capture, checkpoint or write up the session, wants the context window
   dumped to a note before compacting, says the window is filling and they want it
   preserved first, or asks to write up the PR that was just pushed.
-allowed-tools: Bash(mkdir*) Bash(date*) Bash(head*) Bash(ls*) Bash(stat*) Bash(basename*) Bash(git rev-parse*) Bash(git symbolic-ref*) Bash(git remote*) Bash(git reflog*) Bash(git log*) Bash(git diff*) Bash(git merge-base*) Bash(/home/pchoudhury/.claude/forgejo-get.sh:*) Bash(git -C /home/pchoudhury/obsidian_vaults/tiberius add:*) Bash(git -C /home/pchoudhury/obsidian_vaults/tiberius commit:*) Bash(git -C /home/pchoudhury/obsidian_vaults/tiberius push:*) Bash(git -C /home/pchoudhury/obsidian_vaults/tiberius pull:*) Bash(git -C /home/pchoudhury/obsidian_vaults/tiberius status:*) Read Write Edit
+allowed-tools: Bash(mkdir*) Bash(date*) Bash(head*) Bash(ls*) Bash(stat*) Bash(basename*) Bash(git rev-parse*) Bash(git symbolic-ref*) Bash(git remote*) Bash(git reflog*) Bash(git log*) Bash(git diff*) Bash(git merge-base*) Bash(${HOME}/.claude/forgejo-get.sh:*) Bash(git -C ${HOME_VAULT} add:*) Bash(git -C ${HOME_VAULT} commit:*) Bash(git -C ${HOME_VAULT} push:*) Bash(git -C ${HOME_VAULT} pull:*) Bash(git -C ${HOME_VAULT} status:*) Read Write Edit
 ---
+
+<!-- Source file: the HOME_VAULT and HOME placeholders are replaced
+     by nixos-config/home.nix (substEnv, values from env.nix) with literal
+     paths at build time. The deployed copy therefore obeys the "write the path
+     out in full" rule in step 6. -->
 
 # Session notes
 
@@ -19,7 +24,7 @@ session pushed a pull request, write a change note for that PR as well.
 Target directory — from `~/.claude/CLAUDE.md` §5, "Claude Sessions":
 
 ```
-${HOME}/obsidian_vaults/tiberius/claude-sessions
+${HOME_VAULT}/claude-sessions
 ```
 
 Write **from your own memory of the conversation**. Do not read the session
@@ -33,7 +38,7 @@ step 1.
 `<session name>_<one-to-three-word description>_<date>.md`
 
 ```sh
-DIR="${HOME}/obsidian_vaults/tiberius/claude-sessions"
+DIR="${HOME_VAULT}/claude-sessions"
 mkdir -p "$DIR"
 
 SLUG=$(pwd | sed 's|/|-|g')
@@ -150,7 +155,7 @@ One API call, **redirected to a file — never piped**, since `$?` reads 0 throu
 a pipe and a 404 becomes an empty object and then fiction:
 
 ```sh
-/home/pchoudhury/.claude/forgejo-get.sh "repos/$SLUG/pulls/$BASE/$BR" > "$tmp" 2>/dev/null
+${HOME}/.claude/forgejo-get.sh "repos/$SLUG/pulls/$BASE/$BR" > "$tmp" 2>/dev/null
 [ -s "$tmp" ] || skip
 ```
 
@@ -259,10 +264,10 @@ its own Bash call: a chained `&&` is checked per segment and hides which half
 failed.
 
 ```sh
-git -C /home/pchoudhury/obsidian_vaults/tiberius add -- <note> [<pr-note>]
-git -C /home/pchoudhury/obsidian_vaults/tiberius status -sb -- <note> [<pr-note>]
-git -C /home/pchoudhury/obsidian_vaults/tiberius commit -m "<message>"
-git -C /home/pchoudhury/obsidian_vaults/tiberius push
+git -C ${HOME_VAULT} add -- <note> [<pr-note>]
+git -C ${HOME_VAULT} status -sb -- <note> [<pr-note>]
+git -C ${HOME_VAULT} commit -m "<message>"
+git -C ${HOME_VAULT} push
 ```
 
 **Stage only the files this skill wrote**, as explicit pathspecs after `--`.
@@ -290,8 +295,8 @@ committed but failed to push.
 push once more — `--autostash` because the working tree may be dirty:
 
 ```sh
-git -C /home/pchoudhury/obsidian_vaults/tiberius pull --rebase --autostash
-git -C /home/pchoudhury/obsidian_vaults/tiberius push
+git -C ${HOME_VAULT} pull --rebase --autostash
+git -C ${HOME_VAULT} push
 ```
 
 One retry, not a loop.

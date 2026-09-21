@@ -71,7 +71,15 @@ Run `cgc doctor`. The active backend and its path come from
 is live rather than assuming — the first line of any cgc command prints it.
 
 **`cgc: command not found`.** Installed via pipx; the shim is `~/.local/bin/cgc`.
-Check `~/.local/bin` is on PATH before concluding it is missing.
+Check `~/.local/bin` is on PATH before concluding it is missing. On the NixOS
+machine it is instead a Nix wrapper (`home.nix`, the `cgc` binding) that runs a
+pinned version through `uvx` — never `pipx`/`pip install` it there. The first
+run downloads it, so it needs network once.
+
+**`libstdc++.so.6: cannot open shared object file`** — reported as a *Database
+Connection Error*, so it reads like the one above. It is not a database problem
+and `cgc doctor` will not fix it: a cgc not launched through the NixOS wrapper
+cannot load the kuzu library. Use the wrapper.
 
 ## Two hygiene notes
 

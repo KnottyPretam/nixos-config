@@ -1,6 +1,23 @@
 { config, pkgs, ... }:
 
 let
+  # The machine-specific variables - see env.nix.
+  env = import ./env.nix { home = config.home.homeDirectory; };
+
+  # Read a file and replace each ${NAME} with its env.nix value (plus ${HOME}),
+  # so the Claude dotfiles get literal paths. They must: Claude's Write tool
+  # does not expand $VARS, and skill allowed-tools patterns match the command
+  # as written. Any other ${...} - shell variables like ${DATE} - is left as is.
+  substEnv =
+    file:
+    let
+      vars = env // { HOME = config.home.homeDirectory; };
+    in
+    builtins.replaceStrings
+      (map (n: "$" + "{" + n + "}") (builtins.attrNames vars))
+      (builtins.attrValues vars)
+      (builtins.readFile file);
+
   # ---------------------------------------------------------------------------
   # AI scratchpad
   #
@@ -66,6 +83,25 @@ let
       HELP_THEME=${./dotfiles/rofi/keybindings.rasi}
       export HELP_THEME
     '' + builtins.readFile ./scripts/help-sheet.sh;
+  };
+
+  # CodeGraphContext, for the cgc-refresh Claude skill. Not in nixpkgs, and its
+  # ~25 Python deps make hand-packaging a poor trade, so uvx fetches it into
+  # ~/.cache/uv on first run. The version pin here is what keeps it
+  # reproducible. Two NixOS-specific details, both observed failing without:
+  #   - LD_LIBRARY_PATH: the kuzu wheel dlopens libstdc++.so.6, which has no
+  #     standard path on NixOS. cgc misreports this as a "Database Connection
+  #     Error". nix-ld does not help - the interpreter is Nix's own Python.
+  #   - --python: otherwise uv downloads a generic-linux Python, which cannot
+  #     execute here at all.
+  cgc = pkgs.writeShellApplication {
+    name = "cgc";
+    runtimeInputs = [ pkgs.uv ];
+    text = ''
+      export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+      exec uvx --python ${pkgs.python3}/bin/python3 \
+        --from codegraphcontext==0.6.13 cgc "$@"
+    '';
   };
 
   aiScratchpadShow = pkgs.writeShellScriptBin "ai-scratchpad-show" ''
@@ -248,9 +284,8 @@ in
     "$HOME/.local/bin"
   ];
 
-  home.sessionVariables = {
-    FORGEJO_URL = "https://code.grail.tiberius.com";
-  };
+  # Edit the values in env.nix, not here.
+  home.sessionVariables = env;
 
   # ---------------------------------------------------------------------------
   # General packages
@@ -259,6 +294,7 @@ in
   home.packages = with pkgs; [
     # Agents
     claude-code
+    cgc # for the cgc-refresh skill - see the wrapper in the let block
 
     # All three AI apps are Chromium web-apps with isolated --user-data-dir
     # profiles - see the ai-scratchpad-show script above.
@@ -341,7 +377,10 @@ in
     valgrind
 
     # Languages and scripting
-    python3
+    # matplotlib + mplcursors are for the picklable-plots Claude skill's
+    # show_figure.py viewer (TkAgg backend). They have to come from Nix: pip
+    # wheels of matplotlib link libstdc++, which a NixOS venv cannot find.
+    (python3.withPackages (ps: [ ps.matplotlib ps.mplcursors ]))
     nodejs
 
     # Shell and Nix tools
@@ -567,6 +606,30 @@ in
     };
 
     "nvim/.luarc.json".source = ./dotfiles/nvim/.config/nvim/.luarc.json;
+  };
+
+  # ---------------------------------------------------------------------------
+  # Claude Code
+  # ---------------------------------------------------------------------------
+
+  # Individual files only - never ~/.claude itself, which Claude Code writes
+  # to constantly (credentials, history, projects, settings.json). These land
+  # as read-only store symlinks, so edit the dotfiles, not ~/.claude: /memory
+  # cannot save changes to CLAUDE.md.
+  home.file = {
+    ".claude/CLAUDE.md".text = substEnv ./dotfiles/claude/.claude/CLAUDE.md;
+
+    ".claude/skills/cgc-refresh" = {
+      source = ./dotfiles/claude/.claude/skills/cgc-refresh;
+      recursive = true;
+    };
+    ".claude/skills/picklable-plots" = {
+      source = ./dotfiles/claude/.claude/skills/picklable-plots;
+      recursive = true;
+    };
+
+    ".claude/skills/session-notes/SKILL.md".text =
+      substEnv ./dotfiles/claude/.claude/skills/session-notes/SKILL.md;
   };
 
   # ---------------------------------------------------------------------------

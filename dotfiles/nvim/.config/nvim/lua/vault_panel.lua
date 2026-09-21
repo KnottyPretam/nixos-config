@@ -6,7 +6,7 @@ local state = {
 }
 
 local config = {
-  vault  = vim.fn.expand("${HOME}/obsidian_vaults/tiberius"),  -- <-- your vault path
+  vault  = vim.env.HOME_VAULT,  -- set in nixos-config/env.nix
   index  = "index.md",
   height = 15,
 }
@@ -25,6 +25,10 @@ local function ensure_index_exists()
 end
 
 local function open_panel()
+  if not config.vault or config.vault == "" then
+    vim.notify("vault panel: $HOME_VAULT is not set (nixos-config/env.nix)", vim.log.levels.ERROR)
+    return
+  end
   local restore_buf = state.buf
   local fresh_path  = nil
   if not restore_buf or not vim.api.nvim_buf_is_valid(restore_buf) then
@@ -79,6 +83,7 @@ end
 
 function M.home()
   if not panel_is_open() then open_panel() end
+  if not panel_is_open() then return end  -- open_panel refused: no vault set
   vim.api.nvim_set_current_win(state.win)
   vim.cmd("edit " .. vim.fn.fnameescape(config.vault .. "/" .. config.index))
   state.buf = vim.api.nvim_get_current_buf()

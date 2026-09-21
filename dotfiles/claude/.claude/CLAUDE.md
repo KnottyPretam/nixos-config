@@ -66,11 +66,11 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 Obsidian Vault Locations For Uploading Memory:
 - "Claude Sessions" → "Directory for each session which contains compact notes from context window"
-    - "Path" → "${HOME}/obsidian_vaults/tiberius/claude-sessions"
+    - "Path" → "${HOME_VAULT}/claude-sessions"
 - "Steel Wiki" → "Wiki Containing vital information from main branch of steel"
-    - "Path" → "${HOME}/obsidian_vaults/tiberius/steel-wiki"
+    - "Path" → "${TIBERIUS_VAULT}/steel-wiki"
 - "Steel SCR Notes" → "notes containing scr changes / updates created by the agent steel-update"
-    - "Path" → "${HOME}/obsidian_vaults/tiberius/steel-scr_notes"
+    - "Path" → "${TIBERIUS_VAULT}/steel-scr_notes"
 
 
 ---
