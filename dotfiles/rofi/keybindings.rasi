@@ -1,0 +1,33 @@
+/* Omarchy's keybindings look, on the gruvbox-dark-hard palette used by
+ * ghostty and starship. Sharp corners, 2px border, ~95% opacity, no icons,
+ * no scrollbar, and selection shown only as a colour change - every one of
+ * those is deliberate and lifted from Omarchy's own CSS. */
+
+* {
+    font:            "JetBrainsMono Nerd Font 13";
+    background-color: transparent;
+    text-color:       #ebdbb2;
+}
+
+window {
+    width:            60%;
+    background-color: #1d2021f2;   /* f2 = ~95% opaque */
+    border:           2px;
+    border-color:     #ebdbb2;
+    border-radius:    0;
+    padding:          20px;
+}
+
+mainbox  { children: [ inputbar, listview ]; spacing: 12px; }
+
+inputbar { children: [ prompt, entry ]; spacing: 8px; }
+prompt   { text-color: #fabd2f; }
+entry    { placeholder: "Search…"; placeholder-color: #928374; }
+
+listview { lines: 20; scrollbar: false; dynamic: true; }
+
+element          { padding: 4px 8px; }
+element selected { background-color: transparent; text-color: #fabd2f; }
+element-text     { background-color: inherit; text-color: inherit; }
+
+scrollbar { enabled: false; }

@@ -50,6 +50,24 @@ let
     exit 1
   '';
 
+  # ---------------------------------------------------------------------------
+  # Keyboard-shortcut cheatsheets (SUPER+SHIFT+H)
+  #
+  # The script lives in its own file rather than inline here: it is ~190 lines
+  # of awk and jq, and Nix indented strings would need every ''${...} and bare
+  # '' escaped. readFile sidesteps that entirely.
+  # ---------------------------------------------------------------------------
+  helpSheet = pkgs.writeShellApplication {
+    name = "help-sheet";
+    runtimeInputs = with pkgs; [
+      hyprland jq gawk tmux neovim rofi coreutils procps gnused
+    ];
+    text = ''
+      HELP_THEME=${./dotfiles/rofi/keybindings.rasi}
+      export HELP_THEME
+    '' + builtins.readFile ./scripts/help-sheet.sh;
+  };
+
   aiScratchpadShow = pkgs.writeShellScriptBin "ai-scratchpad-show" ''
     set -eu
     ws="''${1:?usage: ai-scratchpad-show <ai-chatgpt|ai-claude|ai-grok>}"
@@ -166,6 +184,21 @@ let
     # what scopes SUPER+Tab to the overlay. A Hyprland submap would scope it
     # natively, but while a submap is active every bind outside it stops firing
     # - a stuck submap would cost the lock screen and volume keys too.
+    # A help sheet is up: rofi has focus, but SUPER+Tab is a COMPOSITOR grab and
+    # never reaches it. So hand the next sheet to help-sheet's loop and close
+    # the current popup. Plain Tab is the smoother path - rofi sees that one
+    # directly and exits with code 10, no kill and no flash.
+    state="''${XDG_RUNTIME_DIR:-/tmp}/help-sheet.current"
+    if [ -f "$state" ]; then
+      case "$(cat "$state")" in
+        hypr) echo nvim ;;
+        nvim) echo tmux ;;
+        *)    echo hypr ;;
+      esac > "''${XDG_RUNTIME_DIR:-/tmp}/help-sheet.next"
+      pkill -x rofi || true
+      exit 0
+    fi
+
     case "$cur" in
       special:ai-chatgpt) next=ai-claude ;;
       special:ai-claude)  next=ai-grok ;;
@@ -244,6 +277,7 @@ in
     # a `$NAME` substring substitution (colliding with $PATH, $HOME and the
     # config's own $menu/$mainMod), a bare `#` truncates the line anywhere, and
     # `{{ }}` is hyprlang's own expression syntax.
+    helpSheet
     aiScratchpadShow
     aiScratchpadToggle
     aiScratchpadNext
