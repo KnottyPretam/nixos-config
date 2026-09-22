@@ -287,6 +287,21 @@ in
   # Edit the values in env.nix, not here.
   home.sessionVariables = env;
 
+  # The same values for the systemd user manager, which does NOT read
+  # hm-session-vars.sh. This is what writes them into
+  # ~/.config/environment.d/10-home-manager.conf, and so into every user unit
+  # and everything Hyprland execs.
+  #
+  # It also cures a subtler failure: hm-session-vars.sh returns early when
+  # __HM_SESS_VARS_SOURCED is already set, and the running session and tmux
+  # server both export it from a generation that predates env.nix - so
+  # $HOME_VAULT is currently unset even in a fresh login shell, which is why
+  # obsidian.nvim and vault_panel.lua are both inert.
+  #
+  # environment.d is read once, when `systemd --user` starts: this takes
+  # effect at the next LOGIN, not at the next rebuild.
+  systemd.user.sessionVariables = env;
+
   # ---------------------------------------------------------------------------
   # General packages
   # ---------------------------------------------------------------------------
