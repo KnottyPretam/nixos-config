@@ -94,6 +94,125 @@ let
   #     Error". nix-ld does not help - the interpreter is Nix's own Python.
   #   - --python: otherwise uv downloads a generic-linux Python, which cannot
   #     execute here at all.
+  # ---------------------------------------------------------------------------
+  # rhythm - note taker (SUPER+N) and kanban sync
+  #
+  # DEV LAYOUT: the Python lives in ~/dev/rhythm-note-taker and is deliberately
+  # NOT vendored into this flake yet, so an edit takes effect on the next
+  # invocation with no rebuild. Nix owns only the interface - the binary name,
+  # the PATH closure, the vault path - none of which change when the Python
+  # does. To promote it later:
+  #     cp -r ~/dev/rhythm-note-taker/src/rhythm ~/nixos-config/scripts/rhythm
+  #     git add -A        # untracked files are NOT part of a git: flake source
+  # then swap SRC for ${./scripts/rhythm}. That is the whole migration.
+  #
+  # RHYTHM_VAULT rather than HOME_VAULT: even with the systemd.user
+  # .sessionVariables fix below, the value only lands at the next LOGIN, and
+  # the tmux server predates it either way. Baking the literal path from
+  # env.nix is what makes `rhythm` correct from a keybind today.
+  # ---------------------------------------------------------------------------
+  rhythm = pkgs.writeShellApplication {
+    name = "rhythm";
+    # ghostty, neovim and tmux are deliberately ABSENT: adding them would put
+    # UNCONFIGURED copies ahead of the home-manager wrappers on PATH, and the
+    # overlay would open a default nvim with none of your config.
+    runtimeInputs = with pkgs; [ python3 libnotify ];
+    text = ''
+      SRC="$HOME/dev/rhythm-note-taker/src/rhythm"
+      if [ ! -d "$SRC" ]; then
+        # A Hyprland bind that execs a missing file fails invisibly, so say so.
+        notify-send --urgency=critical "rhythm" "source tree missing: $SRC" || true
+        echo "rhythm: source tree missing: $SRC" >&2
+        exit 1
+      fi
+      export RHYTHM_VAULT=${env.HOME_VAULT}
+      exec python3 "$SRC" "$@"
+    '';
+  };
+
+  # The overlay process itself. Never invoked directly - rhythm-toggle execs it
+  # through a Hyprland exec-bracket so it inherits HL_INITIAL_WORKSPACE_TOKEN,
+  # which is what actually places the window.
+  rhythmOverlay = pkgs.writeShellScriptBin "rhythm-overlay" ''
+    set -eu
+    export RHYTHM_VAULT=${env.HOME_VAULT}
+
+    # `--class` must be a valid GTK application id (dotted reverse-DNS).
+    # An invalid one is a SILENT fallback to com.mitchellh.ghostty, which would
+    # make every rule and gate keyed on this class hit your ordinary terminals
+    # instead. `ghostty +validate-config --class=...` exits 0 and prints
+    # nothing, so this cannot be caught at build time. Verify at runtime with:
+    #   hyprctl clients -j | jq -r '.[] | select(.class|test("rhythm")) | .class'
+    #
+    # `-e` forces gtk-single-instance=false, which is what makes --class take
+    # effect at all; it also forces quit-after-last-window-closed=true, which
+    # is why `:q` is remapped to hide inside lua/rhythm.lua.
+    exec ghostty --class=com.rhythm.note -e \
+      nvim --listen "''${XDG_RUNTIME_DIR:-/tmp}/rhythm.sock" \
+           -c 'lua require("rhythm").open()'
+  '';
+
+  # SUPER+N. Modelled on ai-scratchpad-show, with one difference: this is a
+  # real toggle, so an already-visible overlay hides rather than no-opping.
+  rhythmToggle = pkgs.writeShellScriptBin "rhythm-toggle" ''
+    set -eu
+    CLS='com.rhythm.note'
+
+    # Find the window ANYWHERE, not just on its own special workspace -
+    # otherwise a drifted window looks like "not running", we relaunch, and a
+    # second instance lands in the wrong place.
+    addr=$(hyprctl clients -j \
+      | jq -r --arg c "$CLS" 'first(.[] | select(.class == $c)) | .address // ""')
+    at=$(hyprctl clients -j \
+      | jq -r --arg c "$CLS" 'first(.[] | select(.class == $c)) | .workspace.name // ""')
+
+    if [ -n "$addr" ]; then
+      if [ "$at" != "special:rhythm" ]; then
+        # Drifted - pull it home before revealing.
+        hyprctl dispatch movetoworkspacesilent "special:rhythm,address:$addr"
+      fi
+      # Dispatch the BARE name - the dispatcher prepends "special:" itself.
+      hyprctl dispatch togglespecialworkspace rhythm
+      exit 0
+    fi
+
+    # Not running. Hold a lock across the launch so a double-tapped SUPER+N
+    # cannot start a second nvim that dies on "--listen: address already in
+    # use" and flashes a window. A stale socket FILE is fine - nvim replaces it.
+    exec 9>"''${XDG_RUNTIME_DIR:-/tmp}/rhythm.launch.lock"
+    flock -n 9 || exit 0
+
+    # Bracket exec-rules split on ';' (not ','), and attach by PID+token rather
+    # than by window class. `size` is a muParser expression over the LOGICAL
+    # monitor size - percentages silently no-op. No `silent`: mapping the
+    # window opens its special workspace and focuses it, which is what we want.
+    hyprctl dispatch exec \
+      "[workspace special:rhythm; float; center; size monitor_w*0.7 monitor_h*0.8] ${rhythmOverlay}/bin/rhythm-overlay"
+  '';
+
+  # SUPER+C. No-ops unless the rhythm window is focused; the "is the notepad
+  # the active view" half is answered inside nvim, in the same tick as the
+  # action, because asking then acting from out here is two round trips with a
+  # gap in between.
+  rhythmNew = pkgs.writeShellScriptBin "rhythm-new" ''
+    # Deliberately no `set -e`: every failure path must still exit 0, so a
+    # keybind never surfaces an error.
+    #
+    # `.class // ""` - activewindow returns {} when nothing is focused, and a
+    # bare `jq -r .class` would yield the STRING "null".
+    cls=$(hyprctl activewindow -j 2>/dev/null | jq -r '.class // ""')
+    [ "$cls" = "com.rhythm.note" ] || exit 0
+
+    # --remote-send (nvim_input, a FAST rpc call), never --remote-expr: the
+    # latter has no timeout of any kind and hangs indefinitely whenever nvim's
+    # main loop is blocked, which on a global keybind is unacceptable.
+    # The payload must contain NO literal '<' beyond <Cmd> and <CR>, or the key
+    # parser swallows the trailing <CR> and strands nvim on the command line.
+    timeout 1 nvim --server "''${XDG_RUNTIME_DIR:-/tmp}/rhythm.sock" \
+      --remote-send '<Cmd>lua require("rhythm").new_note()<CR>' >/dev/null 2>&1
+    exit 0
+  '';
+
   cgc = pkgs.writeShellApplication {
     name = "cgc";
     runtimeInputs = [ pkgs.uv ];
@@ -329,6 +448,10 @@ in
     # config's own $menu/$mainMod), a bare `#` truncates the line anywhere, and
     # `{{ }}` is hyprlang's own expression syntax.
     helpSheet
+    rhythm
+    rhythmOverlay
+    rhythmToggle
+    rhythmNew
     aiScratchpadShow
     aiScratchpadToggle
     aiScratchpadNext
@@ -916,6 +1039,59 @@ in
 
     # Unlike a timer, this one DOES install into the target - running once at
     # session start is the whole point.
+    Install.WantedBy = [ "graphical-session.target" ];
+  };
+
+  # ---------------------------------------------------------------------------
+  # Hourly nudge for kanban "Route" tasks - the column for things that need
+  # passing along to someone - 11:00 to 14:00 local, weekdays.
+  # ---------------------------------------------------------------------------
+  systemd.user.services.rhythm-route = {
+    Unit = {
+      Description = "Notify about kanban Route tasks";
+      # NOT ConditionEnvironment=WAYLAND_DISPLAY, despite the precedent above:
+      # uwsm's env_cleanup.list does not include WAYLAND_DISPLAY, so it lingers
+      # stale in the user manager after the compositor exits and the condition
+      # would pass with nothing to notify. HYPRLAND_INSTANCE_SIGNATURE IS in
+      # that list, so it is the honest probe for "is there a session".
+      ConditionEnvironment = "HYPRLAND_INSTANCE_SIGNATURE";
+      After = [ "graphical-session.target" ];
+      PartOf = [ "graphical-session.target" ];
+    };
+
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${rhythm}/bin/rhythm remind-route";
+    };
+
+    # Deliberately NO Install: the timer is what starts this. Installing it
+    # into a target would also fire it once at every login.
+  };
+
+  systemd.user.timers.rhythm-route = {
+    Unit = {
+      Description = "Hourly kanban Route reminder, 11:00-14:00 on weekdays";
+      PartOf = [ "graphical-session.target" ];
+    };
+
+    Timer = {
+      # Local time. America/Phoenix never observes DST, so there is no skipped
+      # or doubled hour to reason about. Verify with:
+      #   systemd-analyze calendar 'Mon..Fri *-*-* 11,12,13,14:00:00'
+      OnCalendar = "Mon..Fri *-*-* 11,12,13,14:00:00";
+
+      # The default AccuracySec is 1min, which would let a nudge drift off the
+      # hour it is named after.
+      AccuracySec = "1s";
+
+      # Persistent is for catching up a missed backup. A time-of-day nudge
+      # fired at 16:30 for the 11:00 slot is just noise, and it would also fire
+      # immediately the first time the timer starts.
+      Persistent = false;
+    };
+
+    # graphical-session.target, not timers.target: the nudge only means
+    # anything while you are logged in, and it should stop on logout.
     Install.WantedBy = [ "graphical-session.target" ];
   };
 
