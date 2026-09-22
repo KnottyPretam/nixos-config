@@ -39,7 +39,21 @@
                   claude-code =
                     (import nixpkgs-claude {
                       inherit (prev) system config;
-                    }).claude-code;
+                    }).claude-code.override {
+                      # nixpkgs is behind (2.1.278) and Opus 5.5 needs 2.1.280,
+                      # so the release manifest is pinned here instead. It
+                      # carries the version and the per-platform checksum, and
+                      # is the package's own argument - no patching involved.
+                      # Refresh with:
+                      #   V=$(curl -s https://downloads.claude.ai/claude-code-releases/latest)
+                      #   curl -s -o pkgs/claude-code-manifest.json \
+                      #     "https://downloads.claude.ai/claude-code-releases/$V/manifest.zst.json"
+                      # DELETE this override once nixpkgs ships >= 2.1.280, so
+                      # claude-code goes back to tracking its input.
+                      manifest = builtins.fromJSON (
+                        builtins.readFile ./pkgs/claude-code-manifest.json
+                      );
+                    };
                 })
               ];
             }
