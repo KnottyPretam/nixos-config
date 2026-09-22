@@ -155,7 +155,10 @@ let
     # `-e` forces gtk-single-instance=false, which is what makes --class take
     # effect at all; it also forces quit-after-last-window-closed=true, which
     # is why `:q` is remapped to hide inside lua/rhythm.lua.
-    exec ghostty --class=com.rhythm.note -e \
+    # --font-size applies to this window only; your ordinary terminals keep 12.
+    # It must precede -e, because everything after -e is the command. -e is
+    # also what makes per-window config flags take effect at all.
+    exec ghostty --class=com.rhythm.note --font-size=10 -e \
       nvim --listen "''${XDG_RUNTIME_DIR:-/tmp}/rhythm.sock" \
            -c 'lua require("rhythm").open()'
   '';
@@ -195,7 +198,7 @@ let
     # monitor size - percentages silently no-op. No `silent`: mapping the
     # window opens its special workspace and focuses it, which is what we want.
     hyprctl dispatch exec \
-      "[workspace special:rhythm; float; center; size monitor_w*0.7 monitor_h*0.8] ${rhythmOverlay}/bin/rhythm-overlay"
+      "[workspace special:rhythm; float; center; size monitor_w*0.9 monitor_h*0.9] ${rhythmOverlay}/bin/rhythm-overlay"
 
     # Hold the lock until the window actually MAPS, not merely until the
     # dispatch returns. Releasing it at exit leaves a gap in which a second
@@ -1090,6 +1093,34 @@ in
 
     # Deliberately NO Install: the timer is what starts this. Installing it
     # into a target would also fire it once at every login.
+  };
+
+  # ---------------------------------------------------------------------------
+  # Fold every note's markers onto the board every half hour, so the board is
+  # right even when the app has not been opened. The in-app BufWritePost hook
+  # covers the note you are writing; this covers everything else, and it passes
+  # no --cursor, so it also sweeps up any line a cursor-skip left unstamped.
+  # ---------------------------------------------------------------------------
+  systemd.user.services.rhythm-refresh = {
+    Unit.Description = "Fold note markers onto the kanban board";
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${rhythm}/bin/rhythm sync";
+    };
+    # No ConditionEnvironment: this touches files, not the display, so it is
+    # useful with or without a graphical session.
+  };
+
+  systemd.user.timers.rhythm-refresh = {
+    Unit.Description = "Half-hourly kanban sync";
+    Timer = {
+      OnCalendar = "*:0/30";
+      # Catch up one missed run after a resume, rather than silently skipping
+      # the sweep. Unlike the Route nudge, a late sync is still correct.
+      Persistent = true;
+      RandomizedDelaySec = "30s";
+    };
+    Install.WantedBy = [ "timers.target" ];
   };
 
   systemd.user.timers.rhythm-route = {
