@@ -1,5 +1,15 @@
 { config, pkgs, ... }:
 
+let
+  # Claude Code Notification hook - see scripts/claude-notify.sh.
+  claudeNotify = pkgs.writeShellApplication {
+    name = "claude-notify";
+    runtimeInputs = with pkgs; [ jq libnotify tmux coreutils gnugrep ];
+    text = ''
+      CLAUDE_ICON=${./icons/claude.png}
+    '' + builtins.readFile ./scripts/claude-notify.sh;
+  };
+in
 {
   imports = [
     ./hardware-configuration.nix
@@ -151,6 +161,31 @@
     pciutils
     usbutils
   ];
+
+  # Claude Code desktop notifications that name the session. Its built-in
+  # notifications (Ghostty OSC 777) carry no session identity, so they are
+  # turned off and a Notification hook sends its own instead.
+  #
+  # Managed settings - Claude's system-level drop-in directory - rather than
+  # ~/.claude/settings.json, which Claude writes itself (/config, theme) and so
+  # cannot be a read-only Nix file. Read at startup: restart sessions after a
+  # switch. The channel shows as locked in /config as a result.
+  environment.etc."claude-code/managed-settings.d/50-notifications.json".text =
+    builtins.toJSON {
+      # The real enum value, read from the installed binary - not the docs'
+      # "bell"/"desktop".
+      preferredNotifChannel = "notifications_disabled";
+      hooks.Notification = [
+        {
+          hooks = [
+            {
+              type = "command";
+              command = "${claudeNotify}/bin/claude-notify";
+            }
+          ];
+        }
+      ];
+    };
 
   # Keep the value already present in your original configuration.
   system.stateVersion = "26.05";
