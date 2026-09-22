@@ -21,11 +21,18 @@ local function sh(args)          -- fire and forget; never block the editor
 end
 
 -- nvim_buf_set_lines throws on a nomodifiable buffer, so bracket every write.
+-- `readonly` has to be cleared as well: leaving it set makes each write emit
+-- "W10: Warning: Changing a readonly file", and three startup messages are
+-- enough to trip the hit-enter prompt, which blocks nvim's main loop -- so the
+-- overlay would open stuck, with SUPER+C silently doing nothing until you
+-- pressed Enter. The watcher re-render would warn again on every board change.
 local function render(buf, lines)
   if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
+  vim.bo[buf].readonly = false
   vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
+  vim.bo[buf].readonly = true
 end
 
 local function kanban_lines()
@@ -40,7 +47,6 @@ local function ro_tab(view, lines)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_name(buf, "rhythm://" .. view)
   vim.api.nvim_win_set_buf(0, buf)
-  vim.bo[buf].readonly = true
   -- buftype=nofile blocks `:w` but NOT `:w <filename>`. This is what blocks
   -- that. Do NOT `return true` from the callback -- that deletes the autocmd.
   vim.api.nvim_create_autocmd("BufWriteCmd", {

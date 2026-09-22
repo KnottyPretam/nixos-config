@@ -137,6 +137,14 @@ let
     set -eu
     export RHYTHM_VAULT=${env.HOME_VAULT}
 
+    # HOME_VAULT as well, and deliberately: obsidian.nvim and vault_panel.lua
+    # both read it and disable themselves when it is empty, and the "disabled"
+    # notice is one of the startup messages that trips nvim's hit-enter prompt,
+    # which blocks the main loop and leaves the overlay opening stuck. Setting
+    # it here also makes obsidian.nvim work inside the note app immediately,
+    # rather than after the next login.
+    export HOME_VAULT=${env.HOME_VAULT}
+
     # `--class` must be a valid GTK application id (dotted reverse-DNS).
     # An invalid one is a SILENT fallback to com.mitchellh.ghostty, which would
     # make every rule and gate keyed on this class hit your ordinary terminals
@@ -188,6 +196,22 @@ let
     # window opens its special workspace and focuses it, which is what we want.
     hyprctl dispatch exec \
       "[workspace special:rhythm; float; center; size monitor_w*0.7 monitor_h*0.8] ${rhythmOverlay}/bin/rhythm-overlay"
+
+    # Hold the lock until the window actually MAPS, not merely until the
+    # dispatch returns. Releasing it at exit leaves a gap in which a second
+    # SUPER+N still sees no client, takes the freed lock and launches a second
+    # overlay. Observed live before this loop existed: two windows and five
+    # nvim processes, with the loser dying on "--listen: address already in
+    # use". Ghostty maps within a few hundred ms; nvim finishing its plugin
+    # load long afterwards does not matter here.
+    i=0
+    while [ "$i" -lt 50 ]; do
+      sleep 0.1
+      if hyprctl clients -j | jq -e --arg c "$CLS" 'any(.[]; .class == $c)' >/dev/null 2>&1
+      then break
+      fi
+      i=$((i + 1))
+    done
   '';
 
   # SUPER+C. No-ops unless the rhythm window is focused; the "is the notepad
