@@ -452,7 +452,12 @@ function M.open()
   fetch("radar")
 
   vim.o.showtabline = 2
-  vim.o.tabline = '%!v:lua.require("rhythm").tabline()'
+  -- A global, not '%!v:lua.require("rhythm").tabline()': v:lua cannot chain a
+  -- call off require() here. That form fails with E5101 + E117, and those two
+  -- messages alone are enough to trip the hit-enter prompt, which blocks the
+  -- main loop and leaves the overlay opening stuck.
+  _G.RhythmTabline = function() return M.tabline() end
+  vim.o.tabline = "%!v:lua.RhythmTabline()"
 
   -- Watch the DIRECTORY, not the file: `rhythm sync` writes temp + os.replace,
   -- and that rename orphans the file's inode, killing an inode-bound watch.
