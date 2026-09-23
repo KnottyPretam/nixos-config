@@ -138,19 +138,68 @@ render_nvim() {
   tail -n +2 "$cache"
 }
 
+# ---------------------------------------------------------------------------
+# Ghostty - `ghostty +list-keybinds` prints the LIVE set: its own defaults plus
+# anything from ~/.config/ghostty/config, which home-manager writes. So this
+# sheet needs no curation and cannot drift from the config.
+#
+# Each line is `keybind = <chord>=<action>`. The chord can itself contain an
+# '=' - `ctrl+=` is zoom-in - so the split is at the LAST '=', never the first.
+# No action contains one, which is what makes that unambiguous.
+# ---------------------------------------------------------------------------
+
+render_ghostty() {
+  ghostty +list-keybinds 2>/dev/null \
+    | sed 's/^keybind = //' \
+    | awk '
+        {
+          p = 0
+          for (i = length($0); i > 0; i--) if (substr($0, i, 1) == "=") { p = i; break }
+          if (p < 2) next                      # no chord, or no action
+          n++
+          chord[n] = substr($0, 1, p - 1)
+          act[n]   = substr($0, p + 1)
+          have[chord[n]] = 1
+        }
+        END {
+          for (i = 1; i <= n; i++) {
+            # ghostty lists the same binding twice, as the physical key and as
+            # its logical name: alt+digit_1 AND alt+1. Drop the alias, but only
+            # when its twin is actually present, so a config that binds ONLY
+            # the physical form still shows up.
+            twin = chord[i]; gsub(/digit_/, "", twin)
+            if (twin != chord[i] && have[twin]) continue
+            c = chord[i]; a = act[i]
+            gsub(/_/, " ", c); gsub(/\+/, " + ", c)
+            # `ctrl++` is ctrl plus the literal '+' key: the separator and the
+            # key collide into a double space. Collapse, then trim.
+            gsub(/  +/, " ", c); sub(/ +$/, "", c)
+            # `new_split:right` reads as `new split - right`
+            gsub(/_/, " ", a); sub(/:/, " \xc2\xb7 ", a)
+            printf "%s\t%s\n", toupper(c), a
+          }
+        }' \
+    | sort -u | fmt
+}
+
 render() {
   case "$1" in
     hypr) render_hypr ;;
     nvim) render_nvim ;;
     tmux) render_tmux ;;
+    ghostty) render_ghostty ;;
     *) echo "unknown sheet: $1" >&2; exit 1 ;;
   esac
 }
 
+# Keep this in step with the same rotation in ai-scratchpad-next (home.nix),
+# which is the SUPER+Tab path -- that chord is a compositor grab and never
+# reaches rofi, so it cannot share this function.
 next_sheet() {
   case "$1" in
     hypr) echo nvim ;;
     nvim) echo tmux ;;
+    tmux) echo ghostty ;;
     *)    echo hypr ;;
   esac
 }

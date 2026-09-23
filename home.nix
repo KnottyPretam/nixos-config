@@ -78,6 +78,9 @@ let
     name = "help-sheet";
     runtimeInputs = with pkgs; [
       hyprland jq gawk tmux neovim rofi coreutils procps gnused
+      # For `ghostty +list-keybinds`. Same derivation programs.ghostty
+      # installs, so this adds nothing to the closure.
+      ghostty
     ];
     text = ''
       HELP_THEME=${./dotfiles/rofi/keybindings.rasi}
@@ -372,9 +375,11 @@ let
     # directly and exits with code 10, no kill and no flash.
     state="''${XDG_RUNTIME_DIR:-/tmp}/help-sheet.current"
     if [ -f "$state" ]; then
+      # Same rotation as next_sheet() in scripts/help-sheet.sh.
       case "$(cat "$state")" in
         hypr) echo nvim ;;
         nvim) echo tmux ;;
+        tmux) echo ghostty ;;
         *)    echo hypr ;;
       esac > "''${XDG_RUNTIME_DIR:-/tmp}/help-sheet.next"
       pkill -x rofi || true
