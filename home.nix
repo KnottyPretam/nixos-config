@@ -490,6 +490,16 @@ in
     # Desktop applications
     obsidian
 
+    # Unfree; allowed by nixpkgs.config.allowUnfree in configuration.nix.
+    # Separate from the `chromium` above, which exists only to back the AI
+    # web-apps - keeping them apart means a Chrome profile and the AI overlay
+    # profiles can never collide. Firefox stays the default browser.
+    google-chrome
+
+    # Electron, so it needs NIXOS_OZONE_WL=1 (set in configuration.nix) to run
+    # on Wayland rather than blurry under XWayland. Unfree, as above.
+    slack
+
     # SUPER+G cycles a centered AI overlay: ChatGPT -> Claude -> Grok -> back to
     # work. Three special workspaces, one per app; Hyprland allows only one
     # visible per monitor, so they are mutually exclusive by construction and a
