@@ -198,7 +198,7 @@ let
     # monitor size - percentages silently no-op. No `silent`: mapping the
     # window opens its special workspace and focuses it, which is what we want.
     hyprctl dispatch exec \
-      "[workspace special:rhythm; float; center; size monitor_w*0.9 monitor_h*0.9] ${rhythmOverlay}/bin/rhythm-overlay"
+      "[workspace special:rhythm; float; maximize] ${rhythmOverlay}/bin/rhythm-overlay"
 
     # Hold the lock until the window actually MAPS, not merely until the
     # dispatch returns. Releasing it at exit leaves a gap in which a second

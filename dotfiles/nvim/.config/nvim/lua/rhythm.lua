@@ -14,7 +14,15 @@ local M = {}
 
 local VAULT = vim.env.RHYTHM_VAULT or vim.env.HOME_VAULT or ""
 local KDIR, KFILE = VAULT .. "/kanban", "tiberius_kanban.md"
-local ORDER = { "notepad", "kanban", "radar" }
+local ORDER = { "notepad", "activity", "project", "radar" }
+
+-- The Alt-Tab rotation, deliberately NOT ORDER. The radar is a hardcoded
+-- placeholder until its backend lands, so it is built and reachable but kept
+-- out of the cycle: landing on a stub every third press is friction for no
+-- information, and it puts the project board one press from the activity one.
+-- <M-r> jumps to the radar; add it back here when it has real data.
+local CYCLE = { "notepad", "activity", "project" }
+local BOARDS = { activity = true, project = true }
 local NS = vim.api.nvim_create_namespace("rhythm")
 
 local MINW, GAP = 24, 2              -- minimum readable TEXT width; gutter between lanes
@@ -22,6 +30,12 @@ local PAD = 4                        -- a tile spends 2 cells on borders and 2 o
 local REFRESH_MS = 30 * 60 * 1000    -- belt-and-braces refresh; the watcher does the rest
 
 M.tabs, M.bufs, M.off, M.cards, M.data, M.gen = {}, {}, {}, {}, {}, {}
+-- Selection. `sel` is a card ID, never a row: the board is refetched on every
+-- sync by the directory watcher, and an index would slide under the selection
+-- whenever a card was added above it. `col` is the ABSOLUTE column index, so it
+-- survives lane scrolling, and `idx` is the depth within that column, which is
+-- what the selection falls back to when its card disappears (you removed it).
+M.sel, M.selcol, M.selidx, M.lanes = {}, {}, {}, {}
 
 -- Foreground-only, always. catppuccin runs transparent_background and ghostty
 -- has background-opacity=0.7 with background-opacity-cells unset, so any cell
@@ -39,7 +53,24 @@ local function hl()
   -- plugin loads. Seven lanes, six ramp colours, so Special takes the seventh.
   for i = 1, 6 do link("RhythmAccent" .. i, "RenderMarkdownH" .. i) end
   link("RhythmAccent7", "Special")
+  -- Activity colours for the project board's card borders. Linked to the
+  -- theme's own diagnostic groups rather than hardcoded hex, so they follow the
+  -- colorscheme; under catppuccin these resolve to #f38ba8 / #a6e3a1 / #f9e2af.
+  -- All three are foreground-only, which the opacity note above requires.
+  link("RhythmActive", "DiagnosticError")    -- red
+  link("RhythmMonitor", "DiagnosticOk")      -- green
+  link("RhythmRoute", "DiagnosticWarn")      -- yellow
+  -- Backlog is deliberately absent: "no colour" is the fourth state.
+  link("RhythmSel", "CursorLineNr")
 end
+
+-- Activity -> border highlight. A missing entry (backlog, or no activity at
+-- all) means the card keeps the default rule colour.
+local TINT = {
+  active = "RhythmActive",
+  monitor = "RhythmMonitor",
+  route = "RhythmRoute",
+}
 
 ---------------------------------------------------------------------------
 -- display-cell helpers
@@ -121,8 +152,8 @@ local function push(st, segs)
 end
 
 --- Draw `data` into a list of lines plus extmarks plus a card-region table.
-local function compose(data, width, height, off)
-  local st = { rows = {}, marks = {}, cards = {}, w = width }
+local function compose(data, width, height, off, sel)
+  local st = { rows = {}, marks = {}, cards = {}, w = width, selfound = false }
   local cols = data.columns or {}
   local lanes, tw = geometry(width, #cols)
   off = math.max(0, math.min(off or 0, math.max(0, #cols - lanes)))
@@ -185,19 +216,27 @@ local function compose(data, width, height, off)
       if used + cost > body - 1 then over = #entries - ei + 1 break end
       if used > 0 then g[#g + 1] = { { string.rep(" ", lane) } }; used = used + 1 end
       local dim = e.dim and "RhythmDim" or nil
-      local edge = dim or "RhythmRule"
+      -- Border colour, in priority order: the selection (the one thing you
+      -- must never lose track of), then the activity tint the payload asked
+      -- for, then done-ness, then the plain rule.
+      local picked = sel and e.id ~= "" and e.id == sel
+      local edge = (picked and "RhythmSel") or TINT[e.tint or ""] or dim or "RhythmRule"
+      if picked then st.selfound = true end
       g[#g + 1] = { { "╭" .. string.rep("─", tw + 2) .. "╮", edge } }
       local first = #g
       for i, t in ipairs(lines) do
         local m = (i == #lines) and meta or ""
-        g[#g + 1] = { { "│ ", "RhythmRule" }, { fit(t, tw - (m == "" and 0 or mw)), dim },
-                      { m, "RhythmMeta" }, { " │", "RhythmRule" } }
+        g[#g + 1] = { { "│ ", edge }, { fit(t, tw - (m == "" and 0 or mw)), dim },
+                      { m, "RhythmMeta" }, { " │", edge } }
       end
       g[#g + 1] = { { "╰" .. string.rep("─", tw + 2) .. "╯", edge } }
       used = used + cost - (used > 0 and 1 or 0)
-      -- remember where this card sits, so `d` can find it under the cursor
+      -- Where this card sits. `col` is the ABSOLUTE column index (lanes are
+      -- relative to the current scroll offset), which is what navigation and
+      -- the selection are keyed on.
       st.cards[#st.cards + 1] = {
-        lane = li, r1 = first, r2 = #g, id = e.id or "", text = e.text or "",
+        lane = li, col = off + li, depth = ei,
+        r1 = first, r2 = #g, id = e.id or "", text = e.text or "",
       }
     end
     if over > 0 then g[#g + 1] = { { fit("  +" .. over .. " more", lane), "RhythmDim" } } end
@@ -233,14 +272,16 @@ local function compose(data, width, height, off)
 
   while #st.rows < height - 1 do push(st, { { "" } }) end
   local right = #st.cards .. " shown  "
-  local hint = width < 80 and "  h l scroll   d remove   q next"
-      or "  h l  scroll     d  remove card     q  next view"
+  local hint = width < 80 and "  jk card  hl column  x remove  q next"
+      or "  j k  card     h l  column     x  remove card     q  next view"
   push(st, {
     { fit(hint, width - vim.api.nvim_strwidth(right)), "RhythmDim" },
     { right, "RhythmDim" },
   })
 
   st.off = off
+  st.lanes = lanes
+  st.ncols = #cols
   return st
 end
 
@@ -261,9 +302,27 @@ local function paint(view)
 
   local w = vim.api.nvim_win_get_width(win)
   local h = vim.api.nvim_win_get_height(win)
-  local st = compose(data, w, h, M.off[view])
+  local st = compose(data, w, h, M.off[view], M.sel[view])
+
+  -- The selected card is gone (you removed it, or a sync moved it off this
+  -- board). Fall back to the same DEPTH in the same column, which is where the
+  -- eye already is, and draw once more so the new selection is visible. Only
+  -- the rare case pays for the second compose.
+  if not st.selfound and #st.cards > 0 then
+    local col, want = M.selcol[view] or 1, M.selidx[view] or 1
+    local list = {}
+    for _, c in ipairs(st.cards) do if c.col == col then list[#list + 1] = c end end
+    if #list == 0 then                       -- that column emptied: take any
+      list, M.selcol[view] = st.cards, st.cards[1].col
+    end
+    local pick = list[math.max(1, math.min(want, #list))]
+    M.sel[view], M.selidx[view] = pick.id, math.max(1, math.min(want, #list))
+    st = compose(data, w, h, M.off[view], M.sel[view])
+  end
+
   M.off[view] = st.off                       -- compose clamps; write it back
   M.cards[view] = st.cards
+  M.lanes[view] = st.lanes
 
   -- `readonly` must be cleared as well as `modifiable`: leaving it set makes
   -- each write emit W10, and enough messages trip the hit-enter prompt, which
@@ -300,7 +359,9 @@ local function fetch(view)
   end
   M.gen[view] = (M.gen[view] or 0) + 1
   local mine = M.gen[view]
-  vim.system({ "rhythm", "board" }, { text = true }, function(r)
+  -- One board per call: `view` is literally the CLI's argument, so the two
+  -- boards stay two small payloads and the grouping stays in board.py.
+  vim.system({ "rhythm", "board", view }, { text = true }, function(r)
     -- fast event context: decode here, everything else on the main loop
     local ok, decoded = pcall(vim.json.decode, r.stdout or "")
     vim.schedule(function()
@@ -321,32 +382,91 @@ end
 -- views
 ---------------------------------------------------------------------------
 
-local function scroll(view, step)
-  M.off[view] = math.max(0, (M.off[view] or 0) + step)
-  paint(view)                                  -- compose clamps the upper end
+---------------------------------------------------------------------------
+-- selection and navigation
+---------------------------------------------------------------------------
+
+local function in_col(view, col)
+  local out = {}
+  for _, c in ipairs(M.cards[view] or {}) do
+    if c.col == col then out[#out + 1] = c end
+  end
+  return out
 end
 
---- `d`: drop the card under the cursor. Its id stays in the board's seen-set,
---- which is what makes sync ignore that marker in the note from now on.
-local function remove_here()
-  local view = vim.t.rhythm_view
-  local cards = M.cards[view]
-  if not cards then return end
-  local row = vim.api.nvim_win_get_cursor(0)[1] - 1
-  local cell = vim.fn.virtcol(".")
-  for _, c in ipairs(cards) do
-    if row >= c.row1 and row <= c.row2 and cell >= c.c1 and cell <= c.c2 then
-      if c.id == "" then
-        vim.notify("rhythm: that card has no id -- edit the board file to drop it",
-          vim.log.levels.WARN)
-        return
-      end
-      if vim.fn.confirm("Remove card?\n\n  " .. c.text, "&Yes\n&No", 2) ~= 1 then return end
-      vim.system({ "rhythm", "remove", c.id }, { text = true },
-        vim.schedule_wrap(function() fetch(view) end))
-      return
-    end
+local function current(view)
+  for n, c in ipairs(in_col(view, M.selcol[view] or 1)) do
+    if c.id == M.sel[view] then return n, c end
   end
+  return nil, nil
+end
+
+--- j / k: the next card down or up, within the current column.
+local function move_row(view, step)
+  local list = in_col(view, M.selcol[view] or 1)
+  if #list == 0 then return end
+  local i = (current(view)) or 1
+  i = math.max(1, math.min(i + step, #list))
+  M.sel[view], M.selidx[view] = list[i].id, i
+  paint(view)
+end
+
+--- h / l: the column to the left or right, holding roughly the same depth.
+--- A column scrolled off-screen is scrolled INTO view first -- otherwise its
+--- cards are not drawn, so there would be nothing to select.
+local function move_col(view, step)
+  local cols = ((M.data[view] or {}).columns) or {}
+  if #cols == 0 then return end
+  local want = M.selidx[view] or 1
+
+  -- Step over EMPTY columns rather than landing on one: an empty lane has
+  -- nothing to select, so stopping there would make the keypress look dead.
+  -- Counts come from the payload, not from the drawn cards, so a column that
+  -- is currently scrolled off-screen is still considered.
+  local col = (M.selcol[view] or 1) + step
+  while col >= 1 and col <= #cols and #(cols[col].entries or {}) == 0 do
+    col = col + step
+  end
+  if col < 1 or col > #cols then return end    -- nothing further that way
+  M.selcol[view] = col
+
+  local lanes, off = M.lanes[view] or 1, M.off[view] or 0
+  if col <= off then off = col - 1
+  elseif col > off + lanes then off = col - lanes end
+  M.off[view] = math.max(0, off)
+
+  paint(view)                                  -- lays out the new lane strip
+  local list = in_col(view, col)
+  if #list > 0 then
+    local i = math.max(1, math.min(want, #list))
+    M.sel[view], M.selidx[view] = list[i].id, i
+  end
+  paint(view)                                  -- now show the selection
+end
+
+--- `x`: drop the selected card. Its id stays in the board's seen-set, which is
+--- what makes sync ignore that marker in the note from now on.
+local function remove_selected()
+  local view = vim.t.rhythm_view
+  local _, c = current(view)
+  if not c then return end
+  if c.id == "" then
+    vim.notify("rhythm: that card has no id -- edit the board file to drop it",
+      vim.log.levels.WARN)
+    return
+  end
+  if vim.fn.confirm("Remove card?\n\n  " .. c.text, "&Yes\n&No", 2) ~= 1 then return end
+  vim.system({ "rhythm", "remove", c.id }, { text = true }, vim.schedule_wrap(function()
+    -- BOTH boards: the card was on each of them, so refreshing only this one
+    -- would leave the other showing a card that no longer exists.
+    M.refresh()
+  end))
+end
+
+--- Refetch every board view. The card set is shared, so anything that changes
+--- it changes both.
+function M.refresh()
+  for v in pairs(BOARDS) do fetch(v) end
 end
 
 local function ro_tab(view)
@@ -375,39 +495,51 @@ local function ro_tab(view)
   })
   local function map(lhs, fn) vim.keymap.set("n", lhs, fn, { buffer = buf, nowait = true }) end
   map("q", function() M.cycle(1) end)
-  map("h", function() scroll(view, -1) end)
-  map("l", function() scroll(view, 1) end)
-  map("<Left>", function() scroll(view, -1) end)
-  map("<Right>", function() scroll(view, 1) end)
-  map("g", function() M.off[view] = 0; paint(view) end)
-  map("G", function() M.off[view] = 99; paint(view) end)
-  map("d", remove_here)
+  map("j", function() move_row(view, 1) end)
+  map("k", function() move_row(view, -1) end)
+  map("<Down>", function() move_row(view, 1) end)
+  map("<Up>", function() move_row(view, -1) end)
+  map("h", function() move_col(view, -1) end)
+  map("l", function() move_col(view, 1) end)
+  map("<Left>", function() move_col(view, -1) end)
+  map("<Right>", function() move_col(view, 1) end)
+  map("g", function() move_row(view, -999) end)
+  map("G", function() move_row(view, 999) end)
+  map("x", remove_selected)
   map("r", function() fetch(view) end)
   vim.t.rhythm_view = view
   M.tabs[view], M.bufs[view], M.off[view] = vim.api.nvim_get_current_tabpage(), buf, 0
+  M.selcol[view], M.selidx[view] = 1, 1
 end
 
 function M.tabline()
   local cur, out = vim.t.rhythm_view, {}
+  local in_cycle = {}
+  for _, v in ipairs(CYCLE) do in_cycle[v] = true end
   for _, v in ipairs(ORDER) do
     local on = v == cur
+    -- a view outside the rotation keeps its slot but says so, so the tabline
+    -- never implies Alt-Tab will reach it
     out[#out + 1] = ("%%#%s# %s %s "):format(on and "RhythmOn" or "RhythmOff",
-      on and "●" or "○", v)
+      on and "●" or (in_cycle[v] and "○" or "·"), v)
   end
-  return table.concat(out) .. "%#RhythmOff#%=alt-tab ⇄  "
+  return table.concat(out) .. "%#RhythmOff#%=alt-tab ⇄   alt-r radar  "
+end
+
+function M.goto_view(name)
+  local h = M.tabs[name]
+  if not (h and vim.api.nvim_tabpage_is_valid(h)) then return end
+  vim.api.nvim_set_current_tabpage(h)
+  if name ~= "notepad" then fetch(name) end
+  vim.cmd.redrawtabline()
 end
 
 function M.cycle(step)
   local cur, i = vim.t.rhythm_view, 0
-  for n, v in ipairs(ORDER) do if v == cur then i = n end end
-  -- i == 0 means a foreign tabpage (:DiffviewOpen, :tabnew) -- go home.
-  local name = (i == 0) and "notepad" or ORDER[(i - 1 + step) % #ORDER + 1]
-  local h = M.tabs[name]
-  if h and vim.api.nvim_tabpage_is_valid(h) then
-    vim.api.nvim_set_current_tabpage(h)
-    if name ~= "notepad" then fetch(name) end
-    vim.cmd.redrawtabline()
-  end
+  for n, v in ipairs(CYCLE) do if v == cur then i = n end end
+  -- i == 0 is any view outside the rotation -- a foreign tabpage
+  -- (:DiffviewOpen, :tabnew) or the radar. Going home is right for all of them.
+  M.goto_view((i == 0) and "notepad" or CYCLE[(i - 1 + step) % #CYCLE + 1])
 end
 
 -- SUPER+C target. Both guards run in the same tick as the action: asking from
@@ -445,10 +577,12 @@ function M.open()
   vim.t.rhythm_view = "notepad"
   M.tabs.notepad = vim.api.nvim_get_current_tabpage()
 
-  ro_tab("kanban")
+  -- Created in ORDER, so Alt-Tab walks them in the order the tabline shows.
+  ro_tab("activity")
+  ro_tab("project")
   ro_tab("radar")
   vim.api.nvim_set_current_tabpage(M.tabs.notepad)
-  fetch("kanban")
+  M.refresh()
   fetch("radar")
 
   vim.o.showtabline = 2
@@ -467,14 +601,15 @@ function M.open()
   M.watch:start(KDIR, {}, function(err, fname)
     if err or fname ~= KFILE or pending then return end
     pending = true
-    vim.defer_fn(function() pending = false; fetch("kanban") end, 50)
+    -- Both boards: one file backs them both.
+    vim.defer_fn(function() pending = false; M.refresh() end, 50)
   end)
 
   -- The board file has a watcher; the radar has no file to watch. This keeps
   -- both honest even if nothing touches them.
   M.timer = vim.uv.new_timer()
   M.timer:start(REFRESH_MS, REFRESH_MS, vim.schedule_wrap(function()
-    fetch("kanban")
+    M.refresh()
     fetch("radar")
   end))
 
@@ -510,6 +645,14 @@ function M.open()
     [[<C-\><C-n><Cmd>lua require("rhythm").cycle(1)<CR>]])
   vim.keymap.set("i", "<M-S-Tab>",
     [[<C-\><C-n><Cmd>lua require("rhythm").cycle(-1)<CR>]])
+  -- The radar is out of the rotation, so it needs its own way in. Mapped in
+  -- every mode for the same reason <M-Tab> is: an unmapped <M-r> does not
+  -- no-op, nvim decomposes it into <Esc> then r, which in insert mode drops
+  -- you out and starts a character-replace.
+  vim.keymap.set({ "n", "v" }, "<M-r>", function() M.goto_view("radar") end,
+    { desc = "rhythm: activity radar" })
+  vim.keymap.set("i", "<M-r>",
+    [[<C-\><C-n><Cmd>lua require("rhythm").goto_view("radar")<CR>]])
 
   -- `ghostty -e` forces quit-after-last-window-closed, so a real :q kills the
   -- process and Hyprland then destroys the emptied special workspace. Hide
