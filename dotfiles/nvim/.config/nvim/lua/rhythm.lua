@@ -71,6 +71,10 @@ local TINT = {
   -- A radar entry you typed rather than one tmux recorded: nothing behind it,
   -- so Enter has nowhere to go. The dim border is the only tell.
   note = "RhythmDim",
+  -- Notifications. Claude is waiting on YOU, which is the most actionable
+  -- thing the radar can show, so it borrows the most urgent colour.
+  claude = "RhythmActive",
+  slack = "RhythmRoute",
 }
 
 ---------------------------------------------------------------------------
@@ -279,11 +283,11 @@ local function compose(data, width, height, off, sel)
   local radar = vim.t.rhythm_view == "radar"
   local hint
   if width < 80 then
-    hint = radar and "  jk hl move  cr jump  x forget"
+    hint = radar and "  jk hl move  cr jump  x clear"
         or "  jk card  hl column  x remove  q next"
   else
     hint = radar
-        and "  j k h l  move     enter  jump to pane     x  forget     q  next view"
+        and "  j k h l  move     enter  jump     x  clear     q  next view"
         or "  j k  card     h l  column     x  remove card     q  next view"
   end
   push(st, {
@@ -459,6 +463,14 @@ local function remove_selected()
     return
   end
   local radar = view == "radar"
+  -- On the radar, only things WE recorded can be dropped. A Claude session or
+  -- a Slack unread belongs to the app that owns it; "forgetting" one here
+  -- would be a lie that reappears on the next refetch.
+  if radar and (c.id:match("^claude:") or c.id:match("^slack:")) then
+    vim.notify("rhythm: that clears itself when you deal with it",
+      vim.log.levels.INFO)
+    return
+  end
   local prompt = radar and "Forget this activity?" or "Remove card?"
   if vim.fn.confirm(prompt .. "\n\n  " .. c.text, "&Yes\n&No", 2) ~= 1 then return end
   local argv = radar and { "rhythm", "radar-forget", c.id }
@@ -559,7 +571,9 @@ local function ro_tab(view)
   map("l", function() move_col(view, 1) end)
   map("<Left>", function() move_col(view, -1) end)
   map("<Right>", function() move_col(view, 1) end)
-  map("g", function() move_row(view, -999) end)
+  -- `gg`, not `g`: a bare `g` mapped with nowait swallows every g-prefixed
+  -- command in the buffer -- gg, gt, gu, the lot.
+  map("gg", function() move_row(view, -999) end)
   map("G", function() move_row(view, 999) end)
   map("x", remove_selected)
   map("<CR>", jump_selected)
@@ -723,7 +737,14 @@ function M.open()
   -- `ghostty -e` forces quit-after-last-window-closed, so a real :q kills the
   -- process and Hyprland then destroys the emptied special workspace. Hide
   -- instead. `:q!` and `:qa!` are left alone as the deliberate way out.
-  vim.api.nvim_create_user_command("RhythmHide", function() M.hide() end, {})
+  -- bang = true is what fixes `:q!`. The abbreviation fires while the command
+  -- line is still exactly "q", so `:q!` became `RhythmHide!` -- and without a
+  -- bang that died with E477: No ! allowed, neither quitting nor hiding.
+  -- Taking the bang makes it mean what it says everywhere else in vim: `:q`
+  -- hides, `:q!` really leaves.
+  vim.api.nvim_create_user_command("RhythmHide", function(a)
+    if a.bang then vim.cmd("qa!") else M.hide() end
+  end, { bang = true })
   for _, c in ipairs({ "q", "qa", "wq", "x" }) do
     local rhs = (c == "wq" or c == "x") and "write <bar> RhythmHide" or "RhythmHide"
     vim.cmd(string.format(

@@ -995,6 +995,17 @@ in
       # conflicts with Hyprland's own blur and the window renders solid.
       "background-opacity" = 0.7;
 
+      # SSH compatibility, both off by default. Without them TERM stays
+      # `xterm-ghostty` over ssh, which almost no remote host knows, so tmux
+      # there refuses to start ("missing or unsuitable terminal") or misdraws.
+      #   ssh-terminfo - installs ghostty's terminfo on the remote via
+      #                  infocmp | tic, then caches that it did so
+      #   ssh-env      - falls back to TERM=xterm-256color if that install fails
+      # They are designed to combine, so enable both. The rest of this list is
+      # ghostty's own default set, restated because the option replaces it
+      # wholesale rather than merging.
+      "shell-integration-features" = "cursor,no-sudo,title,ssh-env,ssh-terminfo,path";
+
       "cursor-style" = "block";
       "cursor-style-blink" = false;
 
@@ -1094,7 +1105,24 @@ in
   xdg.configFile."waybar/style.css".source =
     ./dotfiles/waybar/.config/waybar/style.css;
 
-  services.mako.enable = true;
+  services.mako = {
+    enable = true;
+    settings = {
+      # Keep a usable scrollback. The default is 5, and history is the only
+      # place an expired notification survives at all.
+      max-history = 100;
+
+      # Feed the radar's Notifications lane. mako's own history is no use for
+      # this: five entries, in memory, with no timestamps. `exec` sets the
+      # shell variable `id` to the notification id (there are no %s/%b
+      # specifiers in an action), and rhythm reads the summary back out of
+      # `makoctl list` while the notification is still on screen -- so we get a
+      # durable, timestamped, uncapped record of who pinged.
+      "app-name=Slack" = {
+        on-notify = "exec rhythm notify-tick \"$id\"";
+      };
+    };
+  };
 
   # Restores the daemon that was lost when an over-broad edit to
   # xdg.desktopEntries swallowed this block in 73bd28c.
