@@ -224,6 +224,27 @@ let
   # the active view" half is answered inside nvim, in the same tick as the
   # action, because asking then acting from out here is two round trips with a
   # gap in between.
+  # SUPER+I. One line, no overlay, straight into the radar's log -- opening the
+  # note app to record that you talked to someone defeats the point.
+  rhythmCapture = pkgs.writeShellScriptBin "rhythm-capture" ''
+    # No `set -e`: a keybind must never surface an error.
+    #
+    # An empty stdin with no -no-custom means Enter returns whatever you typed;
+    # that is the entire mechanism. `listview { enabled: false; }` collapses the
+    # (empty) results list rather than relying on dynamic sizing. rofi is a
+    # layer-shell surface, so it self-centres and takes focus with NO Hyprland
+    # window rule -- do not add one, it would do nothing.
+    text=$(rofi -dmenu -p "doing" </dev/null \
+      -theme ${./dotfiles/rofi/keybindings.rasi} \
+      -theme-str 'listview { enabled: false; }' -l 0 2>/dev/null)
+
+    # Escape, or Enter on an empty line: write nothing, say nothing.
+    [ -n "$text" ] || exit 0
+    rhythm radar-note "$text"
+    notify-send --app-name=rhythm "Captured" "$text" || true
+    exit 0
+  '';
+
   rhythmNew = pkgs.writeShellScriptBin "rhythm-new" ''
     # Deliberately no `set -e`: every failure path must still exit 0, so a
     # keybind never surfaces an error.
@@ -484,6 +505,7 @@ in
     rhythmOverlay
     rhythmToggle
     rhythmNew
+    rhythmCapture
     aiScratchpadShow
     aiScratchpadToggle
     aiScratchpadNext
@@ -906,6 +928,33 @@ in
       setw -g automatic-rename off
       set -g allow-rename off
       set -g set-titles off
+
+      # -----------------------------------------------------------------
+      # Activity radar. Every pane focus becomes one row in
+      # ~/.local/state/rhythm/radar.db.
+      #
+      # ONLY #{pane_id} and #{start_time} are passed, and that is a security
+      # boundary rather than a style choice: run-shell expands the format
+      # FIRST and hands the resulting STRING to /bin/sh -c, so a window named
+      #     a;cmd;      $(cmd)      `cmd`
+      # in #{window_name} EXECUTES -- all three were made to run on a
+      # throwaway server. Single-quoting the format does not save you either:
+      # a window named  a';cmd;'  then executes instead. Pane ids and start
+      # times are tmux-minted digits, so there is nothing to escape.
+      #
+      # -g, never -ga: -ga APPENDS, so re-sourcing this config three times
+      # would fire the hook three times per focus event.
+      #
+      # -b is mandatory: without it tmux serialises hook jobs and builds an
+      # unbounded backlog (20 events of `sleep 0.2` completed 2). With it,
+      # 20 rapid switches measured the same as no hook at all.
+      #
+      # pane-focus-in lives in the WINDOW hook table: read it back with
+      # `tmux show-hooks -gw`, NOT -g, and drop a wedged one with
+      # `tmux set-hook -gu pane-focus-in`. focus-events is already on, from
+      # focusEvents = true above.
+      # -----------------------------------------------------------------
+      set-hook -g pane-focus-in "run-shell -b 'rhythm radar-tick #{pane_id} #{start_time}'"
 
       # Panes, messages, copy mode.
       set -g pane-border-style "fg=#394260"

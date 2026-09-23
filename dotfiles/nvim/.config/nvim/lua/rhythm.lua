@@ -16,18 +16,16 @@ local VAULT = vim.env.RHYTHM_VAULT or vim.env.HOME_VAULT or ""
 local KDIR, KFILE = VAULT .. "/kanban", "tiberius_kanban.md"
 local ORDER = { "notepad", "activity", "project", "radar" }
 
--- The Alt-Tab rotation, deliberately NOT ORDER. The radar is a hardcoded
--- placeholder until its backend lands, so it is built and reachable but kept
--- out of the cycle: landing on a stub every third press is friction for no
--- information, and it puts the project board one press from the activity one.
--- <M-r> jumps to the radar; add it back here when it has real data.
-local CYCLE = { "notepad", "activity", "project" }
+-- The Alt-Tab rotation. It matches ORDER now that the radar has real data;
+-- <M-r> still jumps straight to it.
+local CYCLE = { "notepad", "activity", "project", "radar" }
 local BOARDS = { activity = true, project = true }
 local NS = vim.api.nvim_create_namespace("rhythm")
 
 local MINW, GAP = 24, 2              -- minimum readable TEXT width; gutter between lanes
 local PAD = 4                        -- a tile spends 2 cells on borders and 2 on padding
 local REFRESH_MS = 30 * 60 * 1000    -- belt-and-braces refresh; the watcher does the rest
+local AGE_MS = 60 * 1000             -- re-age the radar while you are looking at it
 
 M.tabs, M.bufs, M.off, M.cards, M.data, M.gen = {}, {}, {}, {}, {}, {}
 -- Selection. `sel` is a card ID, never a row: the board is refetched on every
@@ -70,6 +68,9 @@ local TINT = {
   active = "RhythmActive",
   monitor = "RhythmMonitor",
   route = "RhythmRoute",
+  -- A radar entry you typed rather than one tmux recorded: nothing behind it,
+  -- so Enter has nowhere to go. The dim border is the only tell.
+  note = "RhythmDim",
 }
 
 ---------------------------------------------------------------------------
@@ -237,6 +238,9 @@ local function compose(data, width, height, off, sel)
       st.cards[#st.cards + 1] = {
         lane = li, col = off + li, depth = ei,
         r1 = first, r2 = #g, id = e.id or "", text = e.text or "",
+        -- socket|server-start|pane, or "" for a manual note. Its own field:
+        -- `id` is the selection key AND what `x` hands to the CLI.
+        target = e.target or "",
       }
     end
     if over > 0 then g[#g + 1] = { { fit("  +" .. over .. " more", lane), "RhythmDim" } } end
@@ -272,8 +276,16 @@ local function compose(data, width, height, off, sel)
 
   while #st.rows < height - 1 do push(st, { { "" } }) end
   local right = #st.cards .. " shown  "
-  local hint = width < 80 and "  jk card  hl column  x remove  q next"
-      or "  j k  card     h l  column     x  remove card     q  next view"
+  local radar = vim.t.rhythm_view == "radar"
+  local hint
+  if width < 80 then
+    hint = radar and "  jk hl move  cr jump  x forget"
+        or "  jk card  hl column  x remove  q next"
+  else
+    hint = radar
+        and "  j k h l  move     enter  jump to pane     x  forget     q  next view"
+        or "  j k  card     h l  column     x  remove card     q  next view"
+  end
   push(st, {
     { fit(hint, width - vim.api.nvim_strwidth(right)), "RhythmDim" },
     { right, "RhythmDim" },
@@ -344,24 +356,12 @@ end
 M.paint = paint
 
 local function fetch(view)
-  if view == "radar" then
-    M.data.radar = {
-      title = "RADAR",
-      columns = {
-        { title = "Now", accent = 4, entries = {} },
-        { title = "Touched today", accent = 5, entries = {} },
-        { title = "Recent", accent = 6,
-          entries = { { text = "the radar backend is not built yet", meta = "", dim = true, id = "" } } },
-      },
-    }
-    paint(view)
-    return
-  end
   M.gen[view] = (M.gen[view] or 0) + 1
   local mine = M.gen[view]
-  -- One board per call: `view` is literally the CLI's argument, so the two
-  -- boards stay two small payloads and the grouping stays in board.py.
-  vim.system({ "rhythm", "board", view }, { text = true }, function(r)
+  -- The view name IS the CLI argument for a board; the radar is its own
+  -- subcommand because it reads a different store entirely.
+  local argv = view == "radar" and { "rhythm", "radar" } or { "rhythm", "board", view }
+  vim.system(argv, { text = true }, function(r)
     -- fast event context: decode here, everything else on the main loop
     local ok, decoded = pcall(vim.json.decode, r.stdout or "")
     vim.schedule(function()
@@ -446,6 +446,9 @@ end
 
 --- `x`: drop the selected card. Its id stays in the board's seen-set, which is
 --- what makes sync ignore that marker in the note from now on.
+--- `x`: drop the selected thing. What that MEANS differs per view, so the
+--- subcommand is chosen here rather than left to a shared code path -- a radar
+--- key must never reach `rhythm remove`, which edits the kanban file.
 local function remove_selected()
   local view = vim.t.rhythm_view
   local _, c = current(view)
@@ -455,12 +458,65 @@ local function remove_selected()
       vim.log.levels.WARN)
     return
   end
-  if vim.fn.confirm("Remove card?\n\n  " .. c.text, "&Yes\n&No", 2) ~= 1 then return end
-  vim.system({ "rhythm", "remove", c.id }, { text = true }, vim.schedule_wrap(function()
-    -- BOTH boards: the card was on each of them, so refreshing only this one
-    -- would leave the other showing a card that no longer exists.
-    M.refresh()
+  local radar = view == "radar"
+  local prompt = radar and "Forget this activity?" or "Remove card?"
+  if vim.fn.confirm(prompt .. "\n\n  " .. c.text, "&Yes\n&No", 2) ~= 1 then return end
+  local argv = radar and { "rhythm", "radar-forget", c.id }
+      or { "rhythm", "remove", c.id }
+  vim.system(argv, { text = true }, vim.schedule_wrap(function()
+    if radar then
+      fetch("radar")
+    else
+      -- BOTH boards: the card was on each of them, so refreshing only this one
+      -- would leave the other showing a card that no longer exists.
+      M.refresh()
+    end
   end))
+end
+
+--- <CR>: put the tmux client on the pane behind the selected card, then bring
+--- that terminal forward.
+---
+--- The two halves are independent ON PURPOSE. The tmux switch completes before
+--- Hyprland is touched, so a failed focus costs one alt-tab and can never leave
+--- you looking at the wrong pane.
+local function jump_selected()
+  local _, c = current(vim.t.rhythm_view)
+  if not c then return end
+  -- socket|server-start|pane. The socket is stored because the overlay has no
+  -- TMUX_TMPDIR and a dead socket sits at /tmp/tmux-1000/default; the start
+  -- time is stored because pane ids restart at %0 on every new server, so a
+  -- bare %N could resolve to a DIFFERENT pane after a restart.
+  local sock, born, pane = (c.target or ""):match("^([^|]+)|(%d+)|(%%%d+)$")
+  if not sock then
+    vim.notify("rhythm: nothing to jump to", vim.log.levels.INFO)
+    return
+  end
+  local function tmux(...)
+    return vim.system({ "tmux", "-S", sock, ... }, { text = true }):wait(2000)
+  end
+  local alive = tmux("display-message", "-p", "-t", pane, "#{pane_id} #{start_time}")
+  local got, now = (alive.stdout or ""):match("^(%%%d+)%s+(%d+)")
+  if got ~= pane or now ~= born then
+    -- A dead pane prints EMPTY and still exits 0, so the only signal is the
+    -- field coming back blank; a different start_time means a new server.
+    vim.notify("rhythm: that pane is gone", vim.log.levels.WARN)
+    return
+  end
+  local sw = tmux("switch-client", "-t", pane)
+  if sw.code ~= 0 then
+    vim.notify("rhythm: " .. ((sw.stderr or ""):gsub("\n.*", "")), vim.log.levels.WARN)
+    return
+  end
+  -- Hide BEFORE focusing: M.hide() is an unguarded toggle, so doing it after
+  -- could re-open the overlay on top of the terminal we just jumped to.
+  M.hide()
+  -- Best effort only. Every ghostty window shares one pid, so the window
+  -- hosting tmux is identified by its title.
+  vim.system({ "sh", "-c",
+    [[hyprctl clients -j | jq -r '[.[]|select(.class=="com.mitchellh.ghostty")] ]] ..
+    [[| (map(select(.title|test("tmux")))|first) // first | .address // ""' ]] ..
+    [[| xargs -r -I{} hyprctl dispatch focuswindow address:{}]] })
 end
 
 --- Refetch every board view. The card set is shared, so anything that changes
@@ -506,6 +562,7 @@ local function ro_tab(view)
   map("g", function() move_row(view, -999) end)
   map("G", function() move_row(view, 999) end)
   map("x", remove_selected)
+  map("<CR>", jump_selected)
   map("r", function() fetch(view) end)
   vim.t.rhythm_view = view
   M.tabs[view], M.bufs[view], M.off[view] = vim.api.nvim_get_current_tabpage(), buf, 0
@@ -611,6 +668,15 @@ function M.open()
   M.timer:start(REFRESH_MS, REFRESH_MS, vim.schedule_wrap(function()
     M.refresh()
     fetch("radar")
+  end))
+
+  -- The radar's content is ages, and they go stale while you look at them.
+  -- goto_view already refetches on entry, so this only has to cover sitting on
+  -- the view -- and it does nothing at all unless the radar is the view you are
+  -- actually on, which is why it can afford to be a minute.
+  M.tick = vim.uv.new_timer()
+  M.tick:start(AGE_MS, AGE_MS, vim.schedule_wrap(function()
+    if vim.t.rhythm_view == "radar" then fetch("radar") end
   end))
 
   -- Saving a note folds its markers into the board. The cursor line is passed
