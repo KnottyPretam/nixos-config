@@ -75,6 +75,10 @@ local TINT = {
   -- thing the radar can show, so it borrows the most urgent colour.
   claude = "RhythmActive",
   slack = "RhythmRoute",
+  -- A window Hyprland saw you focus -- a chat agent, Slack, the ssh terminal.
+  -- Not a note (Enter DOES go somewhere) and not urgent, so it takes the
+  -- calm colour rather than borrowing either of the other two.
+  win = "RhythmMonitor",
 }
 
 ---------------------------------------------------------------------------
@@ -499,7 +503,17 @@ local function jump_selected()
   -- TMUX_TMPDIR and a dead socket sits at /tmp/tmux-1000/default; the start
   -- time is stored because pane ids restart at %0 on every new server, so a
   -- bare %N could resolve to a DIFFERENT pane after a restart.
-  local sock, born, pane = (c.target or ""):match("^([^|]+)|(%d+)|(%%%d+)$")
+  -- win|<address>: a Hyprland window rather than a tmux pane. The address has
+  -- no 0x prefix in the event stream, but hyprctl wants one.
+  local addr = (c.target or ""):match("^win|(%x+)$")
+  if addr then
+    M.hide()
+    vim.system({ "hyprctl", "dispatch", "focuswindow", "address:0x" .. addr })
+    return
+  end
+  -- A prompt is located by its tmux WINDOW (@N) -- a session file records the
+  -- window, never the pane -- while a focus event is located by its pane (%N).
+  local sock, born, pane = (c.target or ""):match("^([^|]+)|(%d+)|([@%%]%d+)$")
   if not sock then
     vim.notify("rhythm: nothing to jump to", vim.log.levels.INFO)
     return
@@ -507,8 +521,10 @@ local function jump_selected()
   local function tmux(...)
     return vim.system({ "tmux", "-S", sock, ... }, { text = true }):wait(2000)
   end
-  local alive = tmux("display-message", "-p", "-t", pane, "#{pane_id} #{start_time}")
-  local got, now = (alive.stdout or ""):match("^(%%%d+)%s+(%d+)")
+  local alive = tmux("display-message", "-p", "-t", pane,
+    "#{pane_id} #{window_id} #{start_time}")
+  local p, w, now = (alive.stdout or ""):match("^(%%%d+)%s+(@%d+)%s+(%d+)")
+  local got = pane:sub(1, 1) == "@" and w or p
   if got ~= pane or now ~= born then
     -- A dead pane prints EMPTY and still exits 0, so the only signal is the
     -- field coming back blank; a different start_time means a new server.
@@ -655,6 +671,14 @@ function M.open()
   vim.api.nvim_set_current_tabpage(M.tabs.notepad)
   M.refresh()
   fetch("radar")
+
+  -- In the note app the tree is for the VAULT, so a search starts where the
+  -- notes are. Buffer-local would be wrong (the tree is opened from whichever
+  -- buffer you are in); this overrides the key for the overlay's nvim only, so
+  -- neo-tree.lua is untouched and everyday nvim keeps toggle-and-reveal.
+  vim.keymap.set("n", "<leader>tt",
+    "<cmd>Neotree toggle dir=" .. vim.fn.fnameescape(VAULT) .. "<CR>",
+    { desc = "rhythm: vault tree" })
 
   vim.o.showtabline = 2
   -- A global, not '%!v:lua.require("rhythm").tabline()': v:lua cannot chain a

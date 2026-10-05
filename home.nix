@@ -166,6 +166,39 @@ let
            -c 'lua require("rhythm").open()'
   '';
 
+  # SUPER+1..0. Switch workspace AND dismiss whatever overlay is up - the
+  # rhythm note app, or an AI agent.
+  #
+  # binds:hide_special_on_workspace_change (set in hyprland.conf) already does
+  # this for a workspace that actually CHANGES, which covers the swipe gesture.
+  # It cannot cover the case this script exists for: `dispatch workspace N`
+  # while already on N returns early, so nothing changes and the overlay stays
+  # up. Pressing the binding for the workspace you are on is exactly how you
+  # reach for "put this overlay away", so it has to work.
+  #
+  # One --batch, not two dispatches: separate calls let the compositor paint
+  # between them, which shows as a flick of the underlying workspace.
+  wsGo = pkgs.writeShellApplication {
+    name = "ws-go";
+    runtimeInputs = with pkgs; [ hyprland jq ];
+    text = ''
+      n="''${1:?usage: ws-go <workspace>}"
+
+      # The focused monitor's special workspace, prefixed ("special:rhythm"),
+      # or empty when none is open. Do NOT use a window's .visible here - the
+      # overlay windows report visible=true even when hidden.
+      cur=$(hyprctl monitors -j \
+        | jq -r 'first(.[] | select(.focused)) | .specialWorkspace.name // ""')
+
+      if [ -n "$cur" ]; then
+        # togglespecialworkspace takes the BARE name; it prepends "special:".
+        hyprctl --batch "dispatch togglespecialworkspace ''${cur#special:} ; dispatch workspace $n"
+      else
+        hyprctl dispatch workspace "$n"
+      fi
+    '';
+  };
+
   # SUPER+N. Modelled on ai-scratchpad-show, with one difference: this is a
   # real toggle, so an already-visible overlay hides rather than no-opping.
   rhythmToggle = pkgs.writeShellScriptBin "rhythm-toggle" ''
@@ -511,6 +544,7 @@ in
     # config's own $menu/$mainMod), a bare `#` truncates the line anywhere, and
     # `{{ }}` is hyprlang's own expression syntax.
     helpSheet
+    wsGo
     rhythm
     rhythmOverlay
     rhythmToggle
@@ -1193,6 +1227,41 @@ in
   # covers the note you are writing; this covers everything else, and it passes
   # no --cursor, so it also sweeps up any line a cursor-skip left unstamped.
   # ---------------------------------------------------------------------------
+  # The first LONG-RUNNING user unit here; the other three are oneshots behind
+  # timers. It subscribes to Hyprland's event socket and records focus for a
+  # small allowlist of windows - the chat agents and the ssh terminal, which
+  # are structurally invisible to the tmux hook because one is a Chromium web
+  # app and the other runs a REMOTE tmux.
+  #
+  # It costs nothing at rest: a 280-second idle subscription received zero
+  # bytes. There is no polling anywhere in this.
+  systemd.user.services.rhythm-focus = {
+    Unit = {
+      Description = "Log window focus from Hyprland's event socket";
+      PartOf = [ "graphical-session.target" ];
+      After = [ "graphical-session.target" ];
+      # HYPRLAND_INSTANCE_SIGNATURE, not WAYLAND_DISPLAY: the latter lingers
+      # stale in the user environment after the compositor exits, so it would
+      # let this start against a socket path that no longer exists.
+      ConditionEnvironment = [ "HYPRLAND_INSTANCE_SIGNATURE" ];
+      # [Unit], not [Service]: these two moved in systemd 229, and a service
+      # that still carries them is parsed with a warning and no rate limit.
+      StartLimitIntervalSec = 60;
+      StartLimitBurst = 5;
+    };
+    Service = {
+      ExecStart = "${rhythm}/bin/rhythm focus-watch";
+      # recv() returning empty means the compositor went away, and focus-watch
+      # exits non-zero to say so. Restarting is right - a new Hyprland has a
+      # new signature, so the old socket path is dead either way. The limits
+      # stop a flap from spinning (see [Unit] above): five tries a minute,
+      # then give up until the next graphical session.
+      Restart = "on-failure";
+      RestartSec = 2;
+    };
+    Install.WantedBy = [ "graphical-session.target" ];
+  };
+
   systemd.user.services.rhythm-refresh = {
     Unit.Description = "Fold note markers onto the kanban board";
     Service = {

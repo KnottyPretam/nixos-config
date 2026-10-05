@@ -9,6 +9,28 @@ let
       CLAUDE_ICON=${./icons/claude.png}
     '' + builtins.readFile ./scripts/claude-notify.sh;
   };
+
+  # The rhythm prompt hooks - see ~/dev/rhythm-note-taker/src/rhythm/prompts.py.
+  #
+  # A wrapper of its own rather than home.nix's `rhythm`: configuration.nix
+  # cannot see that let-block, and a hook needs neither the vault nor
+  # notify-send, because prompts.py deliberately imports nothing else from the
+  # package. It follows the same dev-layout rule - nix owns the interface, the
+  # Python stays editable without a rebuild.
+  rhythmHook = pkgs.writeShellApplication {
+    name = "rhythm-hook";
+    runtimeInputs = [ pkgs.python3 ];
+    text = ''
+      SRC="$HOME/dev/rhythm-note-taker/src/rhythm"
+      [ -d "$SRC" ] || exit 0
+      # Silence and exit 0 are both load-bearing, so neither is left to the
+      # Python alone. A UserPromptSubmit hook's STDOUT IS APPENDED TO THE
+      # MODEL'S CONTEXT, and a non-zero Stop hook is fed back to Claude as a
+      # reason the turn may not end - a crash here would otherwise turn into
+      # an agent that cannot stop talking.
+      python3 "$SRC" "$@" >/dev/null 2>&1 || true
+    '';
+  };
 in
 {
   imports = [
@@ -175,16 +197,34 @@ in
       # The real enum value, read from the installed binary - not the docs'
       # "bell"/"desktop".
       preferredNotifChannel = "notifications_disabled";
-      hooks.Notification = [
-        {
-          hooks = [
-            {
-              type = "command";
-              command = "${claudeNotify}/bin/claude-notify";
-            }
-          ];
-        }
-      ];
+      hooks = {
+        Notification = [ { hooks = [ { type = "command"; command = "${claudeNotify}/bin/claude-notify"; } ]; } ];
+
+        # The radar's prompt tracking. Files in managed-settings.d are read in
+        # sorted order and merged, but whether `hooks` deep-merges or shallow
+        # -replaces is not legible in the bundle - so these live in the SAME
+        # file as the Notification hook above rather than a 51-*.json of their
+        # own. Guessing wrong would silently disable claude-notify.
+        #
+        # All four events carry a `prompt_id`, which is what joins a prompt to
+        # the turn that ends it.
+
+        # `source` here is what history.jsonl cannot give: it separates a
+        # prompt you typed from a task notification or a /loop wakeup.
+        UserPromptSubmit = [ { hooks = [ { type = "command"; command = "${rhythmHook}/bin/rhythm-hook prompt-sent"; } ]; } ];
+
+        # Marks a turn answered. `background_tasks` is what keeps this honest:
+        # a turn parked on background work has not finished.
+        Stop = [ { hooks = [ { type = "command"; command = "${rhythmHook}/bin/rhythm-hook prompt-done"; } ]; } ];
+
+        # A turn that DIES never fires Stop. Without this its prompt would read
+        # as still running forever, and never leave the lane.
+        StopFailure = [ { hooks = [ { type = "command"; command = "${rhythmHook}/bin/rhythm-hook prompt-failed"; } ]; } ];
+
+        # /plan and /model are you operating the tool, not asking it something.
+        # This is the proper filter for them; matching a leading "/" is not.
+        UserPromptExpansion = [ { hooks = [ { type = "command"; command = "${rhythmHook}/bin/rhythm-hook prompt-expand"; } ]; } ];
+      };
     };
 
   # Keep the value already present in your original configuration.
