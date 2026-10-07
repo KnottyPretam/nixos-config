@@ -19,9 +19,18 @@
 
   outputs =
     { nixpkgs, nixpkgs-claude, home-manager, ... }:
+    let
+      # Who and where this is - see machine.nix. Passed to both the system and
+      # the Home Manager modules so the username lives in exactly one place.
+      machine = import ./machine.nix;
+    in
     {
-      nixosConfigurations.nixos = nixpkgs.lib.nixosSystem {
+      # Named after the host, so a second machine adds its own output rather
+      # than overwriting this one. Build with .#${machine.hostName}.
+      nixosConfigurations.${machine.hostName} = nixpkgs.lib.nixosSystem {
         system = "x86_64-linux";
+
+        specialArgs = { inherit machine; };
 
         modules = [
           ./configuration.nix
@@ -66,7 +75,11 @@
             home-manager.useUserPackages = true;
             home-manager.backupFileExtension = "hm-backup";
 
-            home-manager.users.pretamc = import ./home.nix;
+            # extraSpecialArgs, not specialArgs: the one above reaches the
+            # SYSTEM modules, this one reaches home.nix.
+            home-manager.extraSpecialArgs = { inherit machine; };
+
+            home-manager.users.${machine.username} = import ./home.nix;
           }
         ];
       };

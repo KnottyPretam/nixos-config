@@ -1,4 +1,4 @@
-{ config, pkgs, ... }:
+{ config, pkgs, machine, ... }:
 
 let
   # Claude Code Notification hook - see scripts/claude-notify.sh.
@@ -48,7 +48,7 @@ in
 
   nixpkgs.config.allowUnfree = true;
 
-  networking.hostName = "nixos";
+  networking.hostName = machine.hostName;
   networking.networkmanager.enable = true;
 
   # Tailscale runs a privileged daemon, so it belongs at the system level -
@@ -86,9 +86,13 @@ in
     LC_TIME = "en_US.UTF-8";
   };
 
-  users.users.pretamc = {
+  # Declared from machine.nix. Deliberately NO password here: with
+  # users.mutableUsers at its default of true, an existing account keeps the
+  # password already in /etc/shadow and `passwd` still works. A hashedPassword
+  # in this repo would be a committed secret.
+  users.users.${machine.username} = {
     isNormalUser = true;
-    description = "Pretam";
+    description = machine.fullName;
     extraGroups = [
       "networkmanager"
       "wheel"

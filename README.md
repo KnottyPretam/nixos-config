@@ -9,7 +9,8 @@ flake.nix                 inputs; nixpkgs plus a SEPARATE input for claude-code
 configuration.nix         system: boot, hyprland, audio, fonts, tailscale,
                           Claude Code managed settings + hooks
 home.nix                  everything user-level, and the scripts the keybinds call
-env.nix                   >>> THE ONLY PER-MACHINE FILE. Edit this on a new box.
+machine.nix               >>> PER-MACHINE: username, hostname. Edit on a new box.
+env.nix                   >>> PER-MACHINE: vault paths, Forgejo URL. Same.
 hardware-configuration.nix  machine-specific. REGENERATE on a new box (see below)
 pkgs/claude-code-manifest.json  pinned Claude Code release
 dotfiles/                 hypr, nvim, tmux, waybar, starship, rofi, claude
@@ -39,13 +40,27 @@ Using it unchanged on different hardware will not boot.
 sudo nixos-generate-config --show-hardware-config > hardware-configuration.nix
 ```
 
-### 3. Name the machine
+### 3. Set the username and hostname
 
-Both the hostname and the flake output are `nixos`. For a second machine, give
-it its own name rather than reusing this one:
+Edit **`machine.nix`**:
 
-- `configuration.nix` → `networking.hostName`
-- `flake.nix` → `nixosConfigurations.<host>`, and build with `.#<host>`
+```nix
+{ username = "you"; hostName = "thisbox"; fullName = "Your Name"; }
+```
+
+This is declarative config, so whatever is named here is the account and
+hostname the build **creates**. Building this flake unchanged on another
+computer is what gives that computer this user and the hostname `nixos` — it
+does not read the machine, it imposes what this file says.
+
+Pointing `username` at an account that already exists does **not** touch its
+password. Nothing in this repo sets one (`hashedPassword` is null) and
+`users.mutableUsers` is at its default of `true`, so `/etc/shadow` is left
+alone and `passwd` keeps working. A password hash here would be a committed
+secret.
+
+`hostName` is also the flake output name, so build with `.#<hostName>` — or
+just `--flake ~/nixos-config`, which uses the machine's current hostname.
 
 ### 4. Set the per-machine paths
 
@@ -57,7 +72,7 @@ Claude dotfiles at build time.
 
 ```sh
 git add -A        # see "the flake reads the git tree" below - this is load-bearing
-sudo nixos-rebuild switch --flake ~/nixos-config#nixos
+sudo nixos-rebuild switch --flake ~/nixos-config        # uses this host's name
 ```
 
 ### 6. The steps that cannot be reproducible

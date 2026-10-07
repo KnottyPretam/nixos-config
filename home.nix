@@ -1,4 +1,4 @@
-{ config, pkgs, ... }:
+{ config, pkgs, machine, ... }:
 
 let
   # The machine-specific variables - see env.nix.
@@ -469,8 +469,8 @@ in
   # Home Manager identity
   # ---------------------------------------------------------------------------
 
-  home.username = "pretamc";
-  home.homeDirectory = "/home/pretamc";
+  home.username = machine.username;
+  home.homeDirectory = "/home/${machine.username}";
 
   # For a new installation created with NixOS 26.05.
   # Once set, do not routinely change this during upgrades.
